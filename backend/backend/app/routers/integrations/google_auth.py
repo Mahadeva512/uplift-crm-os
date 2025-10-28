@@ -74,9 +74,13 @@ SCOPES = [
 ]
 
 # --- Utility helpers ---------------------------------------------------------
+from app.core.auth_config import GOOGLE_CREDS
+
 def _require_client_secrets():
-    if not os.path.exists(CLIENT_SECRETS_FILE):
-        raise HTTPException(500, "Missing google_oauth_client.json")
+    """Bypass local JSON file and use environment variables for Render deployment."""
+    if not GOOGLE_CREDS["web"]["client_id"] or not GOOGLE_CREDS["web"]["client_secret"]:
+        raise HTTPException(500, "Missing Google OAuth credentials in environment variables")
+    return GOOGLE_CREDS
 
 def _token_path(email: str) -> Path:
     safe = email.replace("/", "_")
@@ -159,7 +163,8 @@ def _provision_user_if_needed(db: Session, email: str, full_name: Optional[str])
 @router.get("/auth/google")
 def google_login(select_account: bool = Query(default=True)):
     _require_client_secrets()
-    flow = Flow.from_client_secrets_file(CLIENT_SECRETS_FILE, scopes=SCOPES, redirect_uri=REDIRECT_URI)
+    from app.core.auth_config import GOOGLE_CREDS
+flow = Flow.from_client_config(GOOGLE_CREDS, scopes=SCOPES, redirect_uri=REDIRECT_URI)
     auth_url, _ = flow.authorization_url(
         prompt="consent" if select_account else "none",
         access_type="offline",
@@ -174,7 +179,8 @@ def google_callback(request: Request, db: Session = Depends(get_db) if get_db el
     if not code:
         raise HTTPException(400, "Missing authorization code")
 
-    flow = Flow.from_client_secrets_file(CLIENT_SECRETS_FILE, scopes=SCOPES, redirect_uri=REDIRECT_URI)
+    from app.core.auth_config import GOOGLE_CREDS
+flow = Flow.from_client_config(GOOGLE_CREDS, scopes=SCOPES, redirect_uri=REDIRECT_URI)
     flow.fetch_token(code=code)
     creds = flow.credentials
 
