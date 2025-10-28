@@ -1,0 +1,337 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ====== GLOBAL THEME COLORS ====== */
+:root {
+  --uplift-bg: radial-gradient(circle at 20% 20%, #001133, #000814);
+  --uplift-blue: #0048E8;
+  --uplift-gold: #FACC15;
+  --uplift-text: #ffffff;
+  --uplift-glass: rgba(255, 255, 255, 0.05);
+}
+
+/* ====== FULL LAYOUT ====== */
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  width: 100%;
+  font-family: "Inter", system-ui, sans-serif;
+  background: var(--uplift-bg);
+  color: var(--uplift-text);
+  overflow-x: hidden;  /* allow horizontal prevention */
+  overflow-y: auto;    /* ✅ enable vertical scroll */
+}
+
+/* ====== ANIMATION ====== */
+@keyframes pulse-slow {
+  0%, 100% { opacity: 0.9; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.02); }
+}
+.animate-pulse-slow {
+  animation: pulse-slow 8s ease-in-out infinite;
+}
+
+/* ====== TYPOGRAPHY RESET ====== */
+h1, h2, h3, p, input, button, label {
+  color: var(--uplift-text);
+}
+
+/* ====== CARD GLOW ====== */
+.glass-card {
+  background: var(--uplift-glass);
+  backdrop-filter: blur(15px);
+  border-radius: 20px;
+  box-shadow: 0 0 30px rgba(0, 100, 255, 0.25);
+  transition: all 0.3s ease;
+}
+.glass-card:hover {
+  box-shadow: 0 0 35px rgba(250, 200, 50, 0.3);
+}
+
+/* ====== BUTTON STYLE ====== */
+.uplift-btn {
+  background-color: var(--uplift-blue);
+  color: #fff;
+  font-weight: 500;
+  border-radius: 12px;
+  padding: 10px 18px;
+  transition: all 0.2s ease;
+}
+.uplift-btn:hover {
+  background-color: var(--uplift-gold);
+  color: #000;
+  transform: translateY(-2px);
+}
+
+/* ====== INPUT FIELD ====== */
+.uplift-input {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 8px 12px;
+  width: 100%;
+  color: var(--uplift-text);
+  outline: none;
+  transition: border-color 0.2s ease;
+}
+.uplift-input:focus {
+  border-color: var(--uplift-blue);
+}
+
+/* ====== MAP CONTAINER (for Lead Modal) ====== */
+.lead-map {
+  height: 250px;
+  width: 100%;
+  border-radius: 16px;
+  overflow: hidden;
+  margin-top: 1rem;
+  box-shadow: 0 0 15px rgba(0, 72, 232, 0.2);
+}
+
+/* ====== LEADS 2.0 UTILITIES ====== */
+
+/* Compact field + label styling used in modals */
+.lbl {
+  display: block;
+  font-size: 12px;
+  letter-spacing: .04em;
+  color: rgba(226,232,240,.9);
+  margin-bottom: 6px;
+}
+
+.inp {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255,255,255,.05);
+  border: 1px solid rgba(255,255,255,.1);
+  color: #fff;
+  outline: none;
+}
+.inp:focus { border-color: rgba(255,255,255,.25); }
+
+/* Buttons */
+.btn, .btn-warning, .btn-outline, .btn-ghost, .icon-btn {
+  display: inline-flex; align-items: center; gap: .5rem;
+  padding: .6rem .9rem; border-radius: .75rem;
+  border: 1px solid transparent; font-weight: 600;
+}
+
+.btn { background:#2563eb; color:#fff; }
+.btn:hover { background:#1d4ed8; }
+
+.btn-warning { background:#FACC15; color:#0b1428; }
+.btn-warning:hover { background:#eab308; }
+
+.btn-outline { background:transparent; color:#fff; border-color:rgba(255,255,255,.25); }
+.btn-outline:hover { background:rgba(255,255,255,.08); }
+
+.btn-ghost { background:transparent; color:#fff; }
+.btn-ghost:hover { background:rgba(255,255,255,.08); }
+
+.icon-btn { background:transparent; color:#fff; border-color:rgba(255,255,255,.2); padding:.5rem; border-radius:.6rem; }
+.icon-btn:hover { background:rgba(255,255,255,.08); }
+
+/* Scrollbars */
+*::-webkit-scrollbar { height: 10px; width: 10px; }
+*::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 999px; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+/* ====== DARK DROPDOWN FIX ====== */
+select.inp {
+  background-color: #0b1428 !important;
+  color: #f1f5f9 !important;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 10px 12px;
+  outline: none;
+  appearance: none;
+}
+select.inp:focus {
+  border-color: rgba(255, 255, 255, 0.25);
+}
+select.inp option {
+  background-color: #0b1428;
+  color: #f1f5f9;
+}
+select.inp:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* ====== MODAL ANIMATION (for MailPanel) ====== */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.animate-fadeIn {
+  animation: fadeIn 0.3s ease forwards;
+}
+
+/* ====== MAIL PANEL READABILITY FIX ====== */
+.mail-body {
+  color: #f1f5f9;
+  line-height: 1.65;
+  font-size: 14px;
+  text-shadow: 0 0 8px rgba(255, 255, 255, 0.04);
+}
+
+.mail-body strong,
+.mail-body b {
+  color: #fff;
+  font-weight: 600;
+}
+
+.mail-body a {
+  color: #60a5fa;
+  text-decoration: underline;
+}
+
+.mail-body blockquote {
+  border-left: 3px solid rgba(250, 204, 21, 0.4);
+  padding-left: 0.75rem;
+  color: #d1d5db;
+  margin: 0.5rem 0;
+}
+
+.mail-body code {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.mail-body pre {
+  background: rgba(255, 255, 255, 0.05);
+  padding: 0.75rem;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.mail-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+}
+.mail-body th,
+.mail-body td {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 8px;
+  color: #e5e7eb;
+}
+.mail-body th {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* ====== THREAD STYLE CARDS & READER HEIGHT ====== */
+.mail-thread-card {
+  position: relative;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  box-shadow: 0 0 20px rgba(0, 72, 232, 0.05);
+  color: #f8fafc;
+  transition: all 0.25s ease;
+}
+
+.mail-thread-card:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(250, 204, 21, 0.25);
+  box-shadow: 0 0 25px rgba(0, 72, 232, 0.1);
+}
+
+/* main message body (taller, scrollable) */
+.mail-reader {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 14px;
+  padding: 1.25rem 1.5rem;
+  color: #f8fafc;
+  font-size: 15px;
+  line-height: 1.75;
+  box-shadow: 0 0 28px rgba(0, 72, 232, 0.08);
+  min-height: 180px;       /* base height */
+  max-height: 380px;       /* avoid huge overflow */
+  overflow-y: auto;        /* scroll long messages */
+  scrollbar-width: thin;
+}
+
+.mail-reader a { color: #60a5fa; text-decoration: underline; }
+.mail-reader strong, .mail-reader b { color: #fff; }
+.mail-reader blockquote {
+  border-left: 3px solid rgba(250, 204, 21, 0.4);
+  padding-left: 0.75rem;
+  color: #d1d5db;
+  margin: 0.75rem 0;
+}
+.mail-reader pre {
+  background: rgba(255,255,255,0.05);
+  padding: .75rem;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.mail-reader table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+.mail-reader th, .mail-reader td {
+  border: 1px solid rgba(255,255,255,0.1);
+  padding: 8px;
+  color: #e5e7eb;
+}
+.mail-reader th { background: rgba(255,255,255,0.05); }
+
+/* Make single-message threads visually balanced */
+.mail-thread-single {
+  min-height: 260px; /* Taller when only one mail */
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 14px;
+  padding: 1.25rem 1.5rem;
+  color: #f8fafc;
+  font-size: 15px;
+  line-height: 1.75;
+  box-shadow: 0 0 25px rgba(0, 72, 232, 0.08);
+}
+/* AI Copilot Modal background refinement */
+.bg-\[\#0C1428\] {
+  background: radial-gradient(circle at top left, #111a32, #0C1428 70%) !important;
+}
+/* === Fix select dropdown to match Uplift dark theme === */
+select,
+select:focus,
+select:active {
+  background-color: rgba(20, 30, 50, 0.95) !important;
+  color: #f8fafc !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  outline: none !important;
+  border-radius: 8px !important;
+  appearance: none;
+}
+
+/* Dropdown arrow */
+select::-ms-expand {
+  display: none;
+}
+
+/* Options inside dropdown */
+option {
+  background-color: #0C1428 !important;
+  color: #f8fafc !important;
+}
+
+/* Hover highlight for options (some browsers support this) */
+option:hover {
+  background-color: rgba(250, 204, 21, 0.2) !important; /* subtle gold tint */
+}

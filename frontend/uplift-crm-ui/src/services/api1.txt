@@ -1,0 +1,37 @@
+// src/services/api.js
+import axios from "axios";
+
+// ✅ Default from .env or fallback to primary LAN IP
+let API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://192.168.29.70:8000";
+
+// ✅ Auto-detect active network and adjust dynamically
+if (window.location.hostname.startsWith("10.")) {
+  API_BASE_URL = "http://10.70.190.116:8000";
+} else if (window.location.hostname.startsWith("192.")) {
+  API_BASE_URL = "http://192.168.29.70:8000";
+} else if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
+  API_BASE_URL = "http://127.0.0.1:8000";
+}
+
+// ✅ Create reusable axios instance
+const api = axios.create({
+  baseURL: API_BASE_URL,
+  headers: { "Content-Type": "application/json" },
+});
+
+// ✅ Automatically attach token to every request
+api.interceptors.request.use(
+  (config) => {
+    const token =
+      localStorage.getItem("uplift_token") ||
+      localStorage.getItem("token") ||
+      localStorage.getItem("access_token");
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
+
+export default api;

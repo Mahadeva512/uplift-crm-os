@@ -1,0 +1,141 @@
+// src/components/Dashboard.jsx
+import React, { useEffect, useMemo, useState } from "react";
+import OnboardingModal from "./OnboardingModal";
+
+export default function Dashboard({ onLogout, onSwitch }) {
+  const [user, setUser] = useState(null);
+  const [company, setCompany] = useState(null);
+  const [showCompanyModal, setShowCompanyModal] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  const API_BASE = useMemo(() => {
+    const env = import.meta.env?.VITE_API_BASE_URL?.trim();
+    if (env) return env.replace(/\/+$/, "");
+    const host = window.location.hostname || "localhost";
+    return `http://${host}:8000`;
+  }, []);
+
+  // 🧠 Fetch user + company (handles both direct load & post-Google login)
+  useEffect(() => {
+    const token = localStorage.getItem("uplift_token");
+    const email = localStorage.getItem("uplift_user_email");
+
+    async function loadData() {
+      try {
+        const u = JSON.parse(localStorage.getItem("uplift_user") || "{}");
+        setUser(u);
+
+        const res = await fetch(`${API_BASE}/company/profile`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setCompany(data);
+          localStorage.setItem("uplift_company", JSON.stringify(data));
+
+          // Auto-open onboarding if placeholder company
+          if (
+            data?.company_name?.endsWith("’s Company") ||
+            data?.company_name?.endsWith("'s Company")
+          ) {
+            setShowCompanyModal(true);
+          }
+        } else {
+          console.warn("⚠️ Company fetch failed:", res.status);
+          setShowCompanyModal(true);
+        }
+      } catch (err) {
+        console.error("❌ Company load error:", err);
+        setShowCompanyModal(true);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    // Small delay so App.jsx can finish storing token/company first
+    setTimeout(loadData, 400);
+  }, [API_BASE]);
+
+  // 🔧 Update company info from modal
+  async function updateCompany(data) {
+    try {
+      const token = localStorage.getItem("uplift_token");
+      const res = await fetch(`${API_BASE}/company/update`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Update failed");
+      const updated = await res.json();
+      localStorage.setItem("uplift_company", JSON.stringify(updated));
+      setCompany(updated);
+      setShowCompanyModal(false);
+    } catch (err) {
+      console.error("Company update failed:", err);
+      alert("Could not update company info.");
+    }
+  }
+
+  // 🧭 Loader while verifying session/company
+  if (loading)
+    return (
+      <div className="h-screen flex items-center justify-center bg-slate-900 text-white">
+        <div className="animate-pulse text-lg">Loading your workspace…</div>
+      </div>
+    );
+
+  return (
+    <div className="h-screen flex flex-col items-center justify-center bg-slate-900 text-white relative">
+      <h1 className="text-3xl font-bold mb-6">Welcome to Uplift CRM OS</h1>
+
+      <div className="flex flex-wrap gap-4 justify-center">
+        <button
+          onClick={() => onSwitch("leads")}
+          className="bg-green-600 hover:bg-green-500 px-6 py-2 rounded-lg shadow-lg"
+        >
+          Go to Leads
+        </button>
+
+        <button
+          onClick={() => onSwitch("activity-center")}
+          className="bg-yellow-500 hover:bg-yellow-400 text-slate-900 px-6 py-2 rounded-lg shadow-lg font-semibold"
+        >
+          📋 Activity Center
+        </button>
+
+        {/* 🏢 Company Settings button */}
+        <button
+          onClick={() => setShowCompanyModal(true)}
+          className="bg-indigo-500 hover:bg-indigo-400 px-6 py-2 rounded-lg shadow-lg"
+        >
+          🏢 Company Settings
+        </button>
+
+        <button
+          onClick={onLogout}
+          className="bg-blue-600 hover:bg-blue-500 px-6 py-2 rounded-lg shadow-lg"
+        >
+          Logout
+        </button>
+      </div>
+
+      <p className="mt-6 text-slate-400 text-sm">
+        Powered by{" "}
+        <span className="text-yellow-400 font-semibold">Uplift CRM OS AI</span>
+      </p>
+
+      {/* 🪄 Company Onboarding Modal */}
+      {showCompanyModal && (
+        <OnboardingModal
+          user={user}
+          company={company}
+          onSave={updateCompany}
+          onClose={() => setShowCompanyModal(false)}
+        />
+      )}
+    </div>
+  );
+}

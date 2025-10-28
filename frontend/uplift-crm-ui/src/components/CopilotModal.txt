@@ -1,0 +1,188 @@
+import React, { useState } from "react";
+import { X, Sparkles, Send } from "lucide-react";
+
+/**
+ * CopilotModal.jsx
+ * -----------------
+ * AI workspace for Gmail: Summarize thread + Suggest reply + Edit + Send.
+ */
+export default function CopilotModal({
+  open,
+  onClose,
+  thread,
+  onInsert,
+  onSend,
+  axiosClient,
+  userEmail,
+}) {
+  const [tone, setTone] = useState("Neutral");
+  const [summary, setSummary] = useState("");
+  const [suggestion, setSuggestion] = useState("");
+  const [replyText, setReplyText] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  if (!open || !thread) return null;
+
+  // -----------------------------------------
+  // 🧠 Summarize Gmail Thread
+  // -----------------------------------------
+  async function summarizeThread() {
+    setLoading(true);
+    try {
+      // Try to extract thread ID safely from any structure
+      const threadId =
+        thread?.threadId ||
+        thread?.id ||
+        thread?.thread_id ||
+        thread?.messages?.[0]?.threadId ||
+        thread?.messages?.[0]?.id;
+
+      console.log("🧠 Using threadId:", threadId);
+
+      if (!threadId) {
+        setSummary("Summary unavailable (no thread ID).");
+        console.warn("⚠️ No valid threadId found in thread object:", thread);
+        setLoading(false);
+        return;
+      }
+
+      const res = await axiosClient.post(`/ai/gmail/summarize`, {
+        user_email: userEmail,
+        thread_id: threadId, // backend expects underscore
+        subject: thread?.subject || "(no subject)",
+      });
+
+      if (res.data?.error) console.warn("Summarize backend error:", res.data.error);
+      setSummary(res.data?.summary || "Summary unavailable.");
+    } catch (err) {
+      console.error("Summarize request failed:", err);
+      setSummary("Summary unavailable.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // -----------------------------------------
+  // ✍️ AI Suggest Reply
+  // -----------------------------------------
+  async function suggestReply() {
+    setLoading(true);
+    try {
+      const lastMsgs = (thread.messages || [])
+        .slice(-5)
+        .map((m) => ({
+          from: m.from,
+          subject: m.subject,
+          snippet: m.snippet,
+          text: m.textPlain || m.text || "",
+        }));
+
+      const res = await axiosClient.post(`/ai/gmail/suggest`, {
+        tone,
+        subject: thread.subject,
+        last_messages: lastMsgs,
+      });
+
+      const text = res.data?.reply || res.data?.text || "";
+      setSuggestion(text);
+      setReplyText(text);
+    } catch (err) {
+      console.error("Suggest reply failed:", err);
+      setSuggestion("Suggestion unavailable.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // -----------------------------------------
+  // JSX
+  // -----------------------------------------
+  return (
+    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center animate-fadeIn">
+      <div className="bg-[#0C1428] w-[90%] md:w-[70%] h-[85%] rounded-2xl shadow-2xl p-6 flex flex-col border border-white/10 overflow-hidden">
+
+        {/* Header */}
+        <div className="flex justify-between items-center border-b border-white/10 pb-3 mb-4">
+          <h2 className="text-lg font-semibold text-yellow-400 flex items-center gap-2">
+            <Sparkles size={18} className="text-yellow-300" /> AI Copilot – Smart Reply
+          </h2>
+          <button
+            onClick={onClose}
+            className="p-2 rounded hover:bg-white/10 text-white transition"
+            aria-label="Close"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Tone + Actions */}
+        <div className="flex items-center gap-3 mb-4">
+          <select
+            value={tone}
+            onChange={(e) => setTone(e.target.value)}
+            className="text-xs bg-white/5 border border-white/10 rounded px-2 py-1 outline-none"
+          >
+            <option>Neutral</option>
+            <option>Friendly</option>
+            <option>Formal</option>
+            <option>Persuasive</option>
+            <option>Empathetic</option>
+            <option>Concise</option>
+          </select>
+
+          <button
+            onClick={summarizeThread}
+            disabled={loading}
+            className="text-xs px-3 py-1 rounded bg-white/10 hover:bg-white/20 disabled:opacity-50"
+          >
+            Summarize
+          </button>
+
+          <button
+            onClick={suggestReply}
+            disabled={loading}
+            className="text-xs px-3 py-1 rounded bg-yellow-400 text-black font-semibold hover:bg-yellow-300 disabled:opacity-50"
+          >
+            Suggest Reply
+          </button>
+        </div>
+
+        {/* Summary */}
+        <div className="p-3 rounded-lg bg-white/5 border border-white/10 mb-3 flex-1 overflow-y-auto">
+          <p className="text-xs text-gray-400 mb-1">Summary</p>
+          <div className="text-sm whitespace-pre-wrap text-gray-100">
+            {loading ? "Thinking…" : summary || "—"}
+          </div>
+        </div>
+
+        {/* Reply Editor */}
+        <div className="flex-1 flex flex-col">
+          <p className="text-xs text-gray-400 mb-1">Suggested Reply</p>
+          <textarea
+            value={replyText}
+            onChange={(e) => setReplyText(e.target.value)}
+            placeholder="Edit your reply..."
+            className="flex-1 bg-white/5 border border-white/10 rounded-lg p-3 text-sm text-white outline-none resize-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400"
+          />
+        </div>
+
+        {/* Footer buttons */}
+        <div className="flex justify-end gap-2 mt-4 border-t border-white/10 pt-3">
+          <button
+            onClick={() => onInsert(replyText)}
+            className="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-sm text-white"
+          >
+            Insert into Composer
+          </button>
+
+          <button
+            onClick={() => onSend(replyText)}
+            className="px-4 py-2 rounded-lg bg-yellow-400 text-black font-semibold hover:bg-yellow-300 text-sm flex items-center gap-2"
+          >
+            <Send size={14} /> Send Now
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

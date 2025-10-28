@@ -1,0 +1,386 @@
+// src/components/LeadCard.jsx
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Phone, MessageSquare, Mail, ClipboardList } from "lucide-react";
+import MailPanel from "./MailPanel";
+import { createActivity } from "@/api/activities";
+import { useAuthStore } from "@/store/useAuthStore";
+import api from "@/services/api";
+
+/**
+ * Module-level cache to avoid re-checking Gmail availability on every card.
+ * Values: true | false | 'unknown'
+ */
+let gmailAvailable = "unknown";
+let gmailCheckedAt = 0;
+const GMAIL_CHECK_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+async function checkGmailAvailability(userEmail) {
+  const now = Date.now();
+  if (gmailAvailable !== "unknown" && now - gmailCheckedAt < GMAIL_CHECK_TTL_MS) {
+    return gmailAvailable;
+  }
+  try {
+    // Status endpoint should exist in your API. If it 404s, feature is off.
+    // Include user email if your backend reads it for token scoping.
+    await api.get("/integrations/gmail/status", {
+      headers: userEmail ? { "X-User-Email": userEmail } : undefined,
+      params: userEmail ? { user_email: userEmail } : undefined,
+    });
+    gmailAvailable = true;
+  } catch (err) {
+    // Treat 401/403/404 as "not available/connected" (don’t spam console)
+    const code = err?.response?.status;
+    if (code === 401 || code === 403 || code === 404) {
+      gmailAvailable = false;
+    } else {
+      // Other errors might be transient network issues
+      console.warn("Gmail status check error:", err?.message || err);
+      gmailAvailable = false;
+    }
+  } finally {
+    gmailCheckedAt = now;
+  }
+  return gmailAvailable;
+}
+
+const userCache = {};
+
+export default function LeadCard({ lead = {}, onView, onActivity }) {
+  const [unread, setUnread] = useState(0);
+  const [loadingUnread, setLoadingUnread] = useState(false);
+  const [showMail, setShowMail] = useState(false);
+  const [creatorName, setCreatorName] = useState(null);
+  const [gmailOn, setGmailOn] = useState(gmailAvailable === true);
+  const muted404Ref = useRef(false); // avoid repeating logs per lead
+  const pollTimerRef = useRef(null);
+
+  const { user } = useAuthStore?.() || { user: {} };
+
+  // Resolve signed-in email from store or localStorage (belt & suspenders).
+  const signedInEmail = useMemo(() => {
+    return (
+      user?.email ||
+      localStorage.getItem("user_email") ||
+      localStorage.getItem("email") ||
+      undefined
+    );
+  }, [user?.email]);
+
+  // ---------------------- ACTIVITY LOGGER ----------------------
+  const logActivity = async (type, desc, extraMeta = {}) => {
+    if (!lead?.id || !type) return;
+    try {
+      const payload = {
+        lead_id: lead.id,
+        type,
+        title: `${type} — ${lead.business_name || "Lead"}`,
+        description: desc,
+        status: "Completed",
+        outcome: "Pending Notes",
+        assigned_to: user?.id,
+        source_channel: "LeadCard",
+        meta: { auto_logged: true, ...extraMeta },
+      };
+      await createActivity(payload);
+    } catch (err) {
+      console.error("Activity log failed:", err);
+    }
+  };
+
+  // ---------------------- FETCH HELPERS ----------------------
+  const fetchUnread = async () => {
+    if (!gmailOn || !lead?.email) return;
+
+    try {
+      setLoadingUnread(true);
+
+      // Send user context so backend can map to correct Gmail token
+      const headers = signedInEmail ? { "X-User-Email": signedInEmail } : {};
+      const params = signedInEmail ? { user_email: signedInEmail } : undefined;
+
+      const { data } = await api.get(
+        `/integrations/gmail/unread-count/${encodeURIComponent(lead.email)}`,
+        { headers, params }
+      );
+
+      if (typeof data?.unread_count === "number") {
+        setUnread(data.unread_count);
+      } else {
+        setUnread(0);
+      }
+    } catch (e) {
+      const code = e?.response?.status;
+      // Graceful degradation for "expected" failures
+      if (code === 401 || code === 403 || code === 404) {
+        setUnread(0);
+        if (code === 404) {
+          // Endpoint missing in this build — disable polling for this session
+          setGmailOn(false);
+          clearInterval(pollTimerRef.current);
+        }
+        // Silence repeats
+        if (!muted404Ref.current) {
+          muted404Ref.current = true;
+          // One-line breadcrumb without stack spam
+          console.info(
+            "Unread badge disabled (gmail not connected/available). Code:",
+            code
+          );
+        }
+      } else {
+        console.warn("Unread fetch failed:", e?.message || e);
+      }
+    } finally {
+      setLoadingUnread(false);
+    }
+  };
+
+  const fetchCreatorName = async () => {
+    if (!lead?.created_by) return;
+    if (userCache[lead.created_by]) {
+      setCreatorName(userCache[lead.created_by]);
+      return;
+    }
+    try {
+      const { data } = await api.get(`/users/${lead.created_by}`);
+      if (data?.full_name) {
+        userCache[lead.created_by] = data.full_name;
+        setCreatorName(data.full_name);
+      }
+    } catch (e) {
+      // Non-blocking
+    }
+  };
+
+  // First mount: decide if Gmail features should be active; then start polling
+  useEffect(() => {
+    let mounted = true;
+
+    (async () => {
+      const available = await checkGmailAvailability(signedInEmail);
+      if (!mounted) return;
+      setGmailOn(available);
+
+      // Kick an immediate read if available
+      if (available) {
+        fetchUnread();
+        // Poll every 60s (cleared below)
+        pollTimerRef.current = setInterval(fetchUnread, 60000);
+      }
+    })();
+
+    fetchCreatorName();
+
+    return () => {
+      mounted = false;
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lead?.email, lead?.created_by, signedInEmail]);
+
+  // If email address changes (card reused), refresh immediately
+  useEffect(() => {
+    if (gmailOn) fetchUnread();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lead?.email, gmailOn]);
+
+  // ---------------------- UI ACTIONS ----------------------
+  const stop = (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+  };
+
+  const onCall = (e) => {
+    stop(e);
+    const raw = lead?.phone || "";
+    const clean = raw.replace(/\D/g, "");
+    if (!clean) return;
+
+    const callStart = new Date().toISOString();
+    let ended = false;
+    logActivity("Call", "Call initiated", { call_start: callStart, phone: clean });
+    window.location.href = `tel:${clean}`;
+
+    const finalize = (reason) => {
+      if (ended) return;
+      ended = true;
+      const callEnd = new Date().toISOString();
+      logActivity("Call", `Call ended (${reason})`, {
+        call_start: callStart,
+        call_end: callEnd,
+        phone: clean,
+      });
+      document.removeEventListener("visibilitychange", handler);
+      window.removeEventListener("focus", handler);
+    };
+    const handler = () => finalize("user returned / resumed");
+    document.addEventListener("visibilitychange", handler);
+    window.addEventListener("focus", handler);
+    setTimeout(() => finalize("timeout fallback"), 120000);
+  };
+
+  const onWhatsApp = (e) => {
+    stop(e);
+    const raw = lead?.phone || "";
+    const clean = raw.replace(/\D/g, "");
+    if (!clean) {
+      alert("No phone number found for this lead.");
+      return;
+    }
+    const text = encodeURIComponent(
+      `Hi ${lead.contact_person || ""}, this is from ${
+        lead.business_name || "our team"
+      }. Let's connect!`
+    );
+    // wa.me is a tad faster & cleaner
+    const url = `https://wa.me/${clean}?text=${text}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+    logActivity("WhatsApp", `Opened WhatsApp chat with ${clean}`, {
+      phone: clean,
+      verified_event: true,
+    });
+  };
+
+  const onEmail = (e) => {
+    stop(e);
+    if (!lead?.email) {
+      alert("No email found for this lead.");
+      return;
+    }
+    setShowMail(true);
+    logActivity("Email", "Email panel opened");
+  };
+
+  const handleMailSent = (meta = {}) => {
+    logActivity("Email", "Email sent successfully", meta);
+    // Refresh unread bubble right after send
+    fetchUnread();
+  };
+
+  const onActivityClick = (e) => {
+    stop(e);
+    onActivity?.();
+  };
+
+  // ---------------------- PRESENTATION ----------------------
+  const stage = (lead.stage || "New").toString().toLowerCase();
+  const stageColor =
+    stage === "hot"
+      ? "bg-red-500 text-white"
+      : stage === "warm"
+      ? "bg-amber-500 text-slate-900"
+      : "bg-sky-500 text-white";
+
+  let lastUpdated = "—";
+  try {
+    const ts = lead.updated_at || lead.last_updated || lead.created_at;
+    if (ts) {
+      const d = new Date(ts);
+      if (!isNaN(d.getTime())) {
+        lastUpdated = d.toLocaleString("en-IN", {
+          dateStyle: "medium",
+          timeStyle: "short",
+        });
+      }
+    }
+  } catch {
+    /* noop */
+  }
+
+  return (
+    <>
+      <div
+        onClick={onView}
+        className="group w-full rounded-xl bg-[#0C1428]/80 backdrop-blur-lg border border-white/10
+                   hover:border-blue-400/50 hover:shadow-[0_0_20px_rgba(56,189,248,0.25)]
+                   transition-all duration-300 overflow-hidden"
+      >
+        <div className="flex flex-col gap-2.5 p-4 md:p-5 w-full">
+          <div className="flex items-center justify-between flex-wrap mb-1">
+            <h3 className="text-base md:text-lg font-semibold text-white leading-tight">
+              {lead.business_name || "—"}
+            </h3>
+            <span
+              className={`px-2 py-0.5 text-[10px] md:text-xs rounded-full font-semibold ${stageColor}`}
+            >
+              {lead.stage || "New"}
+            </span>
+          </div>
+
+          <div className="text-slate-300 text-xs md:text-sm">
+            {lead.contact_person && (
+              <span className="mr-1.5">{lead.contact_person}</span>
+            )}
+            {lead.city && <span className="text-slate-400">({lead.city})</span>}
+          </div>
+
+          <div
+            className="flex flex-wrap gap-2 justify-start md:justify-end mt-2"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={onCall}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs md:text-sm font-medium shadow-sm"
+            >
+              <Phone size={14} /> Call
+            </button>
+
+            <button
+              onClick={onWhatsApp}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-500 text-white text-xs md:text-sm font-medium shadow-sm"
+            >
+              <MessageSquare size={14} /> WhatsApp
+            </button>
+
+            <button
+              onClick={onEmail}
+              className="relative inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs md:text-sm font-medium shadow-sm"
+              title={gmailOn ? "Compose email" : "Gmail not connected"}
+            >
+              <Mail size={14} /> Email
+              {/* Unread bubble — shown only when Gmail is available */}
+              {gmailOn && unread > 0 && (
+                <span
+                  className={`absolute -top-1 -right-1 ${
+                    unread >= 5 ? "animate-pulse" : ""
+                  } bg-red-500 text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center`}
+                >
+                  {unread}
+                </span>
+              )}
+              {gmailOn && loadingUnread && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 border-2 border-white/80 border-t-transparent rounded-full animate-spin" />
+              )}
+            </button>
+
+            <button
+              onClick={onActivityClick}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-900 text-xs md:text-sm font-medium shadow-sm"
+            >
+              <ClipboardList size={14} /> Activity
+            </button>
+          </div>
+
+          <div className="mt-1 text-[11px] md:text-xs text-slate-400 leading-tight">
+            <div>
+              Last Updated on{" "}
+              <span className="text-slate-200">{lastUpdated}</span>
+            </div>
+            <div>
+              Created By{" "}
+              <span className="text-slate-200">{creatorName || "—"}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {showMail && (
+        <MailPanel
+          lead={lead}
+          onClose={() => setShowMail(false)}
+          onSent={(meta) => handleMailSent(meta)}
+        />
+      )}
+    </>
+  );
+}

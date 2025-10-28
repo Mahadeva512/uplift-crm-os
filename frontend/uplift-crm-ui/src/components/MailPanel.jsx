@@ -1,0 +1,360 @@
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import axios from "axios";
+import {
+  ArrowLeft, Send, RefreshCw, Paperclip,
+  MailOpen, Mail, Search, Download
+} from "lucide-react";
+import CopilotModal from "./CopilotModal";
+
+/* ======================================
+   Helpers & Config
+====================================== */
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+const AUTO_REFRESH_MS = 120000;
+const DRAFT_KEY = (leadId) => `uplift.mail.draft.${leadId || "unknown"}`;
+
+function b64urlDecode(s) {
+  try {
+    const pad = (str) => str + "===".slice((str.length + 3) % 4);
+    const base64 = pad(s).replace(/-/g, "+").replace(/_/g, "/");
+    return JSON.parse(atob(base64));
+  } catch { return null; }
+}
+function getSignedInEmail() {
+  try {
+    const u = JSON.parse(localStorage.getItem("user") || "{}");
+    if (u?.email?.includes("@")) return u.email;
+  } catch {}
+  const ue = localStorage.getItem("user_email");
+  if (ue?.includes("@")) return ue;
+  const jwt = localStorage.getItem("token") || localStorage.getItem("access_token");
+  if (jwt && jwt.split(".").length === 3) {
+    const payload = b64urlDecode(jwt.split(".")[1]);
+    const candidate = payload?.email || payload?.user_email || payload?.preferred_username;
+    if (candidate?.includes("@")) return candidate;
+  }
+  return "";
+}
+function fmtWhen(ts) {
+  try {
+    const d = new Date(ts);
+    if (isNaN(d)) return "";
+    const now = new Date();
+    const diff = (now - d) / 1000;
+    if (diff < 60) return "just now";
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    return d.toLocaleString();
+  } catch { return ""; }
+}
+const safeHtml = (html) => ({ __html: html || "" });
+
+function groupByThread(messages) {
+  const map = new Map();
+  (messages || []).forEach((m) => {
+    const key = m.threadId || (m.subject ? `sub:${m.subject}` : `id:${m.id}`);
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(m);
+  });
+  const threads = Array.from(map.entries()).map(([key, items]) => {
+    const sorted = items.slice().sort(
+      (a, b) => new Date(a.internalDate || a.date || 0) - new Date(b.internalDate || b.date || 0)
+    );
+    const latest = sorted[sorted.length - 1] || {};
+    return {
+      key,
+      threadId: items[0]?.threadId || null,
+      subject: latest.subject || "(no subject)",
+      participants: (latest.from || "").split("<")[0].trim() || latest.from || "",
+      unread: items.some((x) => x.labelIds?.includes?.("UNREAD") || x.unread),
+      hasAttachments: items.some((x) => Array.isArray(x.attachments) && x.attachments.length > 0),
+      updated: latest.internalDate || latest.date || latest.receivedAt,
+      messages: sorted,
+    };
+  });
+  return threads.sort((a, b) => new Date(b.updated || 0) - new Date(a.updated || 0));
+}
+
+/* ======================================
+   MailPanel Component
+====================================== */
+export default function MailPanel({ lead, onClose }) {
+  const [allMessages, setAllMessages] = useState([]);
+  const [threads, setThreads] = useState([]);
+  const [selectedThread, setSelectedThread] = useState(null);
+  const [selectedThreadKey, setSelectedThreadKey] = useState(null);
+
+  const [subject, setSubject] = useState("");
+  const [body, setBody] = useState("");
+  const [attachments, setAttachments] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  const [showCopilot, setShowCopilot] = useState(false);
+
+  const userEmail = useMemo(() => getSignedInEmail(), []);
+  const leadEmail = lead?.email || "";
+  const leadId = lead?.id || lead?.lead_id || lead?.uid || "";
+  const axiosClient = useMemo(
+    () => axios.create({ baseURL: API_BASE, headers: userEmail ? { "X-User-Email": userEmail } : {} }),
+    [userEmail]
+  );
+  const refreshTimer = useRef(null);
+
+  /* ---------------- Load ---------------- */
+  async function loadMessages() {
+    if (!leadEmail || !userEmail) return;
+    try {
+      const res = await axiosClient.get(
+        `/integrations/gmail/messages/${encodeURIComponent(leadEmail)}?user_email=${encodeURIComponent(userEmail)}`
+      );
+      const list = res.data?.messages || [];
+      setAllMessages(list);
+      const grouped = groupByThread(list);
+      setThreads(grouped);
+      const keep = grouped.find((t) => t.key === selectedThreadKey) || grouped[0];
+      setSelectedThread(keep || null);
+      setSelectedThreadKey(keep?.key || null);
+    } catch (err) {
+      console.error("Mail load failed", err);
+    }
+  }
+
+  useEffect(() => {
+    loadMessages();
+    try {
+      const saved = JSON.parse(localStorage.getItem(DRAFT_KEY(leadId)) || "{}");
+      if (saved.subject) setSubject(saved.subject);
+      if (saved.body) setBody(saved.body);
+    } catch {}
+  }, [leadEmail, userEmail]);
+  useEffect(() => {
+    refreshTimer.current && clearInterval(refreshTimer.current);
+    refreshTimer.current = setInterval(loadMessages, AUTO_REFRESH_MS);
+    return () => clearInterval(refreshTimer.current);
+  }, [leadEmail, userEmail]);
+  useEffect(() => {
+    const payload = { subject, body };
+    localStorage.setItem(DRAFT_KEY(leadId), JSON.stringify(payload));
+  }, [subject, body, leadId]);
+  useEffect(() => {
+    setSelectedThread(threads.find((x) => x.key === selectedThreadKey) || null);
+  }, [threads, selectedThreadKey]);
+
+  /* ---------------- Mark Read (NEW) ---------------- */
+  async function markThreadAsRead(threadId) {
+    if (!threadId) return;
+    try {
+      await axiosClient.post(`/integrations/gmail/thread/mark`, {
+        user_email: userEmail,
+        threadId,
+        unread: false,
+      });
+      // optimistic UI: mark local thread as read
+      setThreads((prev) =>
+        prev.map((t) => (t.threadId === threadId ? { ...t, unread: false } : t))
+      );
+    } catch (e) {
+      console.warn("mark read failed", e);
+    }
+  }
+
+  /* ---------------- Send ---------------- */
+  async function sendMail() {
+    if (!userEmail || !leadEmail) return alert("Missing email information.");
+    if (!subject.trim() && !body.trim()) return alert("Add subject or message.");
+    setLoading(true);
+    try {
+      // ALWAYS send as multipart/form-data so backend Form(...) fields are read
+      const fd = new FormData();
+      fd.append("to", leadEmail);
+      fd.append("subject", subject);
+      fd.append("body", body);
+      if (selectedThread?.threadId) fd.append("threadId", selectedThread.threadId); // <-- ensure 'threadId'
+
+      attachments.forEach((f) => fd.append("attachments", f, f.name));
+
+      await axiosClient.post(
+        `/integrations/gmail/reply?user_email=${encodeURIComponent(userEmail)}`,
+        fd,
+        { headers: { "Content-Type": "multipart/form-data" } }
+      );
+
+      setSubject(""); setBody(""); setAttachments([]);
+      localStorage.removeItem(DRAFT_KEY(leadId));
+      await loadMessages();
+    } catch (e) {
+      alert(e?.response?.data?.detail || e.message);
+    } finally { setLoading(false); }
+  }
+
+  const openCopilotModal = () => setShowCopilot(true);
+  const unreadCount = useMemo(() => threads.filter((t) => t.unread).length, [threads]);
+
+  /* ---------------- UI ---------------- */
+  return (
+    <div className="flex flex-col h-full bg-[#0C1428] text-white rounded-2xl border border-white/10 shadow-xl">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 bg-[#0C1428]/80 backdrop-blur-md">
+        <div className="flex items-center gap-2">
+          <button onClick={onClose} className="p-2 rounded-full hover:bg-white/10"><ArrowLeft size={18} /></button>
+          <h2 className="text-lg font-semibold">Mail — {lead?.business_name || "Client"}</h2>
+        </div>
+        <div className="flex items-center gap-2 text-xs text-gray-300">
+          <MailOpen size={14} /> {unreadCount} unread
+          <button onClick={loadMessages}
+            className="px-3 py-1 rounded-md bg-white/10 hover:bg-white/20 flex items-center gap-1 text-xs">
+            <RefreshCw size={14}/> Refresh
+          </button>
+        </div>
+      </div>
+
+      {/* Layout */}
+      <div className="flex-1 grid grid-cols-1 md:grid-cols-3 min-h-0">
+        {/* Thread list */}
+        <div className="border-r border-white/10 md:col-span-1 flex flex-col">
+          <div className="p-3 border-b border-white/10 flex items-center gap-2">
+            <Search size={16} className="text-gray-400" />
+            <span className="text-sm text-gray-400">Threads</span>
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            {threads.length === 0 && (
+              <p className="text-sm text-gray-500 text-center mt-6">No conversations</p>
+            )}
+            {threads.map((t) => {
+              const active = selectedThreadKey === t.key;
+              return (
+                <div key={t.key}
+                  onClick={() => {
+                    setSelectedThreadKey(t.key);
+                    if (t.threadId) markThreadAsRead(t.threadId); // <-- mark read on open
+                  }}
+                  className={`p-3 border-b border-white/5 cursor-pointer ${active ? "bg-white/10" : "hover:bg-white/5"}`}>
+                  <div className="flex items-start justify-between">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold truncate text-white">{t.subject}</p>
+                      <p className="text-xs text-gray-400 truncate">{t.participants}</p>
+                    </div>
+                    <div className="text-[10px] text-gray-500">{fmtWhen(t.updated)}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Right side: Thread viewer + composer */}
+        <div className="md:col-span-2 flex flex-col min-h-0">
+          {/* Messages */}
+          <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 border-b border-white/10">
+            {!selectedThread ? (
+              <div className="text-sm text-gray-400 text-center mt-10">Select a conversation</div>
+            ) : selectedThread.messages.map((m, i) => (
+              <div key={m.id} className="relative transition-all mb-4" style={{ marginLeft: `${i * 16}px` }}>
+                {i < selectedThread.messages.length - 1 && (
+                  <div className="absolute left-[8px] top-[40px] w-[2px] h-[calc(100%-20px)] bg-gradient-to-b from-yellow-400/40 to-blue-400/30 rounded-full" />
+                )}
+                <div className="mail-thread-card p-4 rounded-xl border border-white/10 relative z-10 hover:bg-white/10 transition-all duration-200">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-yellow-400 truncate">{m.subject || "(no subject)"}</div>
+                      <div className="text-xs text-gray-400 truncate">{m.from} • {fmtWhen(m.internalDate||m.date)}</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {(m.attachments || []).map((att) => (
+                        <a key={att.id || att.filename}
+                          href={att.downloadUrl || "#"} target="_blank" rel="noreferrer"
+                          className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-white/10 hover:bg-white/20"
+                          title={att.filename}><Download size={12}/> {att.filename || "file"}</a>
+                      ))}
+                    </div>
+                  </div>
+                  {m.html ? (
+                    <div className="mail-reader mt-3" dangerouslySetInnerHTML={safeHtml(m.html)} />
+                  ) : (
+                    <div className="mail-reader mt-3 whitespace-pre-wrap">
+                      {m.textPlain || m.text || m.snippet || "(no preview)"}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Open Copilot Button */}
+          <div className="flex justify-end px-4 py-2 border-t border-white/10 bg-[#0C1428]/90">
+            <button
+              onClick={openCopilotModal}
+              className="text-xs px-4 py-2 rounded bg-yellow-400 text-black font-semibold hover:bg-yellow-300"
+            >
+              Open AI Copilot
+            </button>
+          </div>
+
+          {/* Composer */}
+          <div className="border-t border-white/10 p-4 bg-[#0C1428]/90 backdrop-blur-md">
+            <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
+              <div className="md:col-span-6">
+                <input
+                  type="text"
+                  placeholder="Subject"
+                  value={subject}
+                  onChange={(e) => setSubject(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 focus:border-yellow-400 text-sm"
+                />
+              </div>
+              <div className="md:col-span-6">
+                <textarea
+                  rows={5}
+                  placeholder="Type your message…"
+                  value={body}
+                  onChange={(e) => setBody(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 focus:border-yellow-400 text-sm resize-none"
+                />
+              </div>
+              <div className="md:col-span-6 flex justify-between items-center">
+                <label className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 cursor-pointer text-sm">
+                  <Paperclip size={16}/> Add attachments
+                  <input
+                    type="file"
+                    className="hidden"
+                    multiple
+                    onChange={(e) => {
+                      const files = Array.from(e.target.files || []);
+                      if (files.length) setAttachments((p) => [...p, ...files]);
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+                <button
+                  onClick={sendMail}
+                  disabled={loading}
+                  className="flex items-center gap-2 bg-yellow-400 text-black px-5 py-2 rounded-lg font-semibold hover:bg-yellow-300 disabled:opacity-50"
+                >
+                  <Send size={16} /> {loading ? "Sending…" : "Send"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Copilot Modal */}
+      <CopilotModal
+        open={showCopilot}
+        onClose={() => setShowCopilot(false)}
+        thread={selectedThread}
+        axiosClient={axiosClient}
+        userEmail={userEmail}
+        onInsert={(text) => {
+          setBody(text);
+          setShowCopilot(false);
+        }}
+        onSend={async (text) => {
+          setBody(text);
+          setShowCopilot(false);
+          await sendMail();
+        }}
+      />
+    </div>
+  );
+}
