@@ -15,7 +15,7 @@ from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 
 # -----------------------------------------------------------------------------
-# DB + models (import gently so app boot never crashes if imports move)
+# DB + models (import gently, keep app boot resilient)
 # -----------------------------------------------------------------------------
 try:
     from app.db.session import get_db
@@ -44,10 +44,10 @@ except Exception:
         pass
 
 # -----------------------------------------------------------------------------
-# JWT helper (uses your existing helper; falls back to minimal impl if absent)
+# JWT helper (use your real one if available)
 # -----------------------------------------------------------------------------
 try:
-    from app.routers.auth import create_access_token
+    from app.routers.auth import create_access_token  # your existing helper
 except Exception:  # minimal fallback
     import jwt
 
@@ -55,8 +55,10 @@ except Exception:  # minimal fallback
     ALGORITHM = "HS256"
 
     def create_access_token(data: dict, expires_delta: Optional[int] = None) -> str:
-        minutes = 120 if expires_delta is None else int(expires_delta)
-        payload = {**data, "exp": datetime.utcnow() + timedelta(minutes=minutes)}
+        expire_minutes = 120 if expires_delta is None else int(expires_delta)
+        expire = datetime.utcnow() + timedelta(minutes=expire_minutes)
+        payload = dict(data)
+        payload["exp"] = expire
         return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 # -----------------------------------------------------------------------------
@@ -72,16 +74,13 @@ ROOT = Path(__file__).resolve().parents[2]
 CREDENTIALS_DIR = ROOT / "routers" / "credentials"
 CREDENTIALS_DIR.mkdir(parents=True, exist_ok=True)
 
-# Where a user-specific Gmail token (for sync) will be cached
-def _token_path(email: str) -> Path:
-    safe = (email or "").replace("/", "_")
-    return CREDENTIALS_DIR / f"token_{safe}.json"
+# Render uses env; we still define a path for any cached token files
+CLIENT_SECRETS_FILE = str(CREDENTIALS_DIR / "google_oauth_client.json")
 
-# Backend/Frontend base & redirect
 BACKEND_BASE = os.getenv("BACKEND_BASE_URL", "http://localhost:8000").rstrip("/")
 FRONTEND_BASE = os.getenv("FRONTEND_BASE_URL", "http://localhost:5173").rstrip("/")
 REDIRECT_URI = f"{BACKEND_BASE}/auth/google/callback"
-FRONTEND_AFTER_GOOGLE = FRONTEND_BASE  # send user here after login
+FRONTEND_AFTER_GOOGLE = FRONTEND_BASE
 
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
@@ -93,20 +92,20 @@ SCOPES = [
 ]
 
 # -----------------------------------------------------------------------------
-# OAuth client config comes from env via app.core.auth_config
+# Auth config: pull from env through app.core.auth_config
 # -----------------------------------------------------------------------------
-from app.core.auth_config import GOOGLE_CREDS  # must expose {"web": {...}}
+from app.core.auth_config import GOOGLE_CREDS  # must exist with client_id/secret
 
 
 def _require_client_secrets() -> dict:
     """
-    Verify Google OAuth credentials are available from env (Render-safe).
+    Validate we have Google OAuth credentials available from env (Render-safe).
     """
     try:
         web = GOOGLE_CREDS["web"]
         if not web.get("client_id") or not web.get("client_secret"):
-            raise KeyError("client_id/client_secret missing")
-    except Exception as e:
+            raise KeyError
+    except Exception as e:  # pragma: no cover
         logger.error("Missing Google OAuth env config: %s", e)
         raise HTTPException(
             status_code=500,
@@ -115,10 +114,16 @@ def _require_client_secrets() -> dict:
     return GOOGLE_CREDS
 
 
-def _save_user_token(email: str, creds) -> None:
+def _token_path(email: str) -> Path:
+    safe = email.replace("/", "_")
+    return CREDENTIALS_DIR / f"token_{safe}.json"
+
+
+def _save_user_token(email: str, creds) -> str:
     p = _token_path(email)
     with open(p, "w", encoding="utf-8") as f:
         f.write(creds.to_json())
+    return str(p)
 
 
 def _load_user_token(email: str):
@@ -137,16 +142,17 @@ def _delete_user_token(email: str) -> None:
 
 
 # -----------------------------------------------------------------------------
-# Minimal auto-provision (safe no-ops if models not present)
+# Auto-provision minimal Company + User (safe no-ops if models missing)
 # -----------------------------------------------------------------------------
 def _create_placeholder_company(db: Session, full_name: str, email: str):
     if not CompanyModel or not db:
         return None
     try:
         first = (full_name or email.split("@")[0]).split()[0]
+        name = f"{first}'s Company"
         company = CompanyModel(
             id=str(uuid.uuid4()),
-            company_name=f"{first}'s Company",
+            company_name=name,
             email=email,
             theme_color="#0C1428",
             accent_color="#FACC15",
@@ -175,7 +181,7 @@ def _provision_user_if_needed(db: Session, email: str, full_name: Optional[str])
             id=str(uuid.uuid4()),
             email=email,
             full_name=full_name or email,
-            hashed_password="",  # OAuth user
+            hashed_password="",
             role="admin",
             is_active=True,
             company_id=getattr(company, "id", None),
@@ -199,7 +205,9 @@ def google_login(select_account: bool = Query(default=True)):
     Start OAuth flow and redirect to Google's consent screen.
     """
     creds_dict = _require_client_secrets()
-    flow = Flow.from_client_config(creds_dict, scopes=SCOPES, redirect_uri=REDIRECT_URI)
+    flow = Flow.from_client_config(
+        creds_dict, scopes=SCOPES, redirect_uri=REDIRECT_URI
+    )
     auth_url, _ = flow.authorization_url(
         prompt="consent" if select_account else "none",
         access_type="offline",
@@ -220,7 +228,9 @@ def google_callback(
         raise HTTPException(status_code=400, detail="Missing authorization code")
 
     creds_dict = _require_client_secrets()
-    flow = Flow.from_client_config(creds_dict, scopes=SCOPES, redirect_uri=REDIRECT_URI)
+    flow = Flow.from_client_config(
+        creds_dict, scopes=SCOPES, redirect_uri=REDIRECT_URI
+    )
     try:
         flow.fetch_token(code=code)
     except Exception as e:
@@ -229,14 +239,14 @@ def google_callback(
 
     creds = flow.credentials
 
-    # Fetch profile
+    # Profile
     me = build("oauth2", "v2", credentials=creds).userinfo().get().execute()
     email = me.get("email")
     full_name = me.get("name") or me.get("given_name") or (email.split("@")[0] if email else "")
     if not email:
         raise HTTPException(status_code=500, detail="Google did not return an email")
 
-    # Save Gmail token & ensure a CRM user exists
+    # Persist user token (for Gmail sync) and ensure a user exists in DB
     _save_user_token(email, creds)
     user = _provision_user_if_needed(db, email, full_name)
 
@@ -249,9 +259,7 @@ def google_callback(
     crm_jwt = create_access_token(payload)
 
     # Send user back to the frontend
-    return RedirectResponse(
-        f"{FRONTEND_AFTER_GOOGLE}?google_token={crm_jwt}&email={email}"
-    )
+    return RedirectResponse(f"{FRONTEND_AFTER_GOOGLE}?google_token={crm_jwt}&email={email}")
 
 
 @router.get("/auth/google/status")
