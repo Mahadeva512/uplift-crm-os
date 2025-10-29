@@ -1,61 +1,47 @@
 // src/context/AICopilotContext.jsx
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useContext, useState, useEffect } from "react";
 import { useAI } from "@/hooks/useAI";
 
-const AICopilotCtx = createContext(null);
+const AICopilotContext = createContext();
 
-export function AICopilotProvider({ children, defaultDays = 7 }) {
-  const { getInsights, summarizeActivity, suggestNextStep, getWeeklyReport, ping } = useAI();
-  const [days, setDays] = useState(defaultDays);
-  const [userId, setUserId] = useState("");
-  const [leadId, setLeadId] = useState("");
-  const [insights, setInsights] = useState(null);
+export function AICopilotProvider({ children }) {
+  const ai = useAI();
+  const [insights, setInsights] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [healthy, setHealthy] = useState("checking");
+  const [error, setError] = useState(null);
 
-  const refreshInsights = async () => {
-    setLoading(true);
+  async function refreshInsights() {
     try {
-      const data = await getInsights({ days, user_id: userId, lead_id: leadId });
-      setInsights(data);
-      setHealthy("ok");
-    } catch (e) {
-      console.warn("AICopilot: insights error", e.message);
-      setHealthy("down");
+      setLoading(true);
+      const data = await ai.getInsights({ days: 7 });
+      setInsights(data || []);
+    } catch (err) {
+      console.error("AICopilot: insights error", err);
+      setError(err);
     } finally {
       setLoading(false);
     }
-  };
+  }
 
-  // health on mount
   useEffect(() => {
-    (async () => {
-      try { await ping(); setHealthy("ok"); } catch { setHealthy("down"); }
-    })();
+    refreshInsights();
   }, []);
 
-  // refresh on filters
-  useEffect(() => { refreshInsights(); }, [days, userId, leadId]);
+  const value = {
+    ai,
+    insights,
+    loading,
+    error,
+    refreshInsights,
+    setInsights,
+  };
 
-  // poll every 60s
-  useEffect(() => {
-    const id = setInterval(refreshInsights, 60_000);
-    return () => clearInterval(id);
-  }, [days, userId, leadId]);
-
-  const value = useMemo(() => ({
-    days, setDays,
-    userId, setUserId,
-    leadId, setLeadId,
-    insights, loading, healthy,
-    actions: { summarizeActivity, suggestNextStep, getWeeklyReport, refreshInsights },
-  }), [days, userId, leadId, insights, loading, healthy]);
-
-  return <AICopilotCtx.Provider value={value}>{children}</AICopilotCtx.Provider>;
+  return (
+    <AICopilotContext.Provider value={value}>
+      {children}
+    </AICopilotContext.Provider>
+  );
 }
 
-export function useAICopilot() {
-  const ctx = useContext(AICopilotCtx);
-  if (!ctx) throw new Error("useAICopilot must be used within <AICopilotProvider>");
-  return ctx;
-}
+// ✅ Exported hook used in Leads.jsx
+export const useAICopilot = () => useContext(AICopilotContext);

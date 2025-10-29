@@ -28,14 +28,14 @@ function resolveApiBase() {
     }
   } catch (_) {}
 
-  return "http://localhost:8000"; // final fallback
+  return "https://uplift-crm-backend.onrender.com"; // final fallback
 }
 
 // ✅ 1. Initialize and persist API base globally
 // 🔥 Guaranteed runtime fallback
 let API_BASE = resolveApiBase();
 if (!API_BASE || API_BASE === "null" || API_BASE === "undefined") {
-  API_BASE = "http://localhost:8000";
+  API_BASE = "https://uplift-crm-backend.onrender.com";
 }
 if (typeof window !== "undefined") {
   window.__API_BASE__ = API_BASE;
