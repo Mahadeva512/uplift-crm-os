@@ -208,3 +208,86 @@ def get_me(current_user: User = Depends(get_current_user), db: Session = Depends
             "footer_note": getattr(company, "footer_note", None),
         },
     }
+# ==========================================================
+#  🌐 GOOGLE OAUTH LOGIN (LIVE READY FOR RENDER)
+# ==========================================================
+from os import getenv
+from fastapi import Request
+from fastapi.responses import RedirectResponse
+from google_auth_oauthlib.flow import Flow
+
+import pathlib
+
+GOOGLE_CLIENT_ID = getenv("GOOGLE_OAUTH_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = getenv("GOOGLE_OAUTH_CLIENT_SECRET")
+BACKEND_URL = getenv("BACKEND_URL", "https://uplift-crm-backend.onrender.com")
+FRONTEND_URL = getenv("FRONTEND_URL", "http://localhost:4173")
+GOOGLE_REDIRECT_URI = getenv("GOOGLE_OAUTH_REDIRECT_URI", f"{BACKEND_URL}/auth/google/callback")
+
+# ✅ OAuth Flow Configuration
+BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
+SCOPES = [
+    "openid",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/gmail.modify",
+]
+
+@router.get("/google", summary="Start Google OAuth flow")
+def google_login():
+    """
+    Redirect user to Google OAuth consent screen.
+    """
+    flow = Flow.from_client_config(
+        {
+            "web": {
+                "client_id": GOOGLE_CLIENT_ID,
+                "client_secret": GOOGLE_CLIENT_SECRET,
+                "redirect_uris": [GOOGLE_REDIRECT_URI],
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+            }
+        },
+        scopes=SCOPES,
+    )
+
+    flow.redirect_uri = GOOGLE_REDIRECT_URI
+    auth_url, _ = flow.authorization_url(prompt="consent", access_type="offline", include_granted_scopes="true")
+    return RedirectResponse(auth_url)
+
+
+@router.get("/google/callback", summary="Handle Google OAuth callback")
+def google_callback(request: Request):
+    """
+    Handle Google OAuth redirect after login.
+    """
+    flow = Flow.from_client_config(
+        {
+            "web": {
+                "client_id": GOOGLE_CLIENT_ID,
+                "client_secret": GOOGLE_CLIENT_SECRET,
+                "redirect_uris": [GOOGLE_REDIRECT_URI],
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+            }
+        },
+        scopes=SCOPES,
+    )
+
+    flow.redirect_uri = GOOGLE_REDIRECT_URI
+
+    # Exchange code for tokens
+    flow.fetch_token(authorization_response=str(request.url))
+
+    # Extract user info
+    credentials = flow.credentials
+    from googleapiclient.discovery import build
+    oauth2 = build("oauth2", "v2", credentials=credentials)
+    user_info = oauth2.userinfo().get().execute()
+
+    # TODO: you can create or fetch user in DB here
+
+    # Redirect to frontend (post-login success)
+    return RedirectResponse(f"{FRONTEND_URL}/")

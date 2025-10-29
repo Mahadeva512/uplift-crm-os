@@ -78,7 +78,7 @@ def _token_path(email: str) -> Path:
     return CREDENTIALS_DIR / f"token_{safe}.json"
 
 # Backend/Frontend base & redirect
-BACKEND_BASE = os.getenv("BACKEND_BASE_URL", "http://localhost:8000").rstrip("/")
+BACKEND_BASE = os.getenv("BACKEND_BASE_URL", "https://uplift-crm-backend.onrender.com").rstrip("/")
 FRONTEND_BASE = os.getenv("FRONTEND_BASE_URL", "http://localhost:5173").rstrip("/")
 REDIRECT_URI = f"{BACKEND_BASE}/auth/google/callback"
 FRONTEND_AFTER_GOOGLE = FRONTEND_BASE  # send user here after login
