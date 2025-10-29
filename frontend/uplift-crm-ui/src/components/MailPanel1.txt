@@ -140,31 +140,45 @@ export default function MailPanel({ lead, onClose }) {
     setSelectedThread(threads.find((x) => x.key === selectedThreadKey) || null);
   }, [threads, selectedThreadKey]);
 
+  /* ---------------- Mark Read (NEW) ---------------- */
+  async function markThreadAsRead(threadId) {
+    if (!threadId) return;
+    try {
+      await axiosClient.post(`/integrations/gmail/thread/mark`, {
+        user_email: userEmail,
+        threadId,
+        unread: false,
+      });
+      // optimistic UI: mark local thread as read
+      setThreads((prev) =>
+        prev.map((t) => (t.threadId === threadId ? { ...t, unread: false } : t))
+      );
+    } catch (e) {
+      console.warn("mark read failed", e);
+    }
+  }
+
   /* ---------------- Send ---------------- */
   async function sendMail() {
     if (!userEmail || !leadEmail) return alert("Missing email information.");
     if (!subject.trim() && !body.trim()) return alert("Add subject or message.");
     setLoading(true);
     try {
-      if (attachments.length > 0) {
-        const fd = new FormData();
-        fd.append("to", leadEmail);
-        fd.append("subject", subject);
-        fd.append("body", body);
-        if (selectedThread?.threadId) fd.append("threadId", selectedThread.threadId);
-        attachments.forEach((f) => fd.append("attachments", f, f.name));
-        await axiosClient.post(
-          `/integrations/gmail/reply?user_email=${encodeURIComponent(userEmail)}`,
-          fd,
-          { headers: { "Content-Type": "multipart/form-data" } }
-        );
-      } else {
-        await axiosClient.post(
-          `/integrations/gmail/reply?user_email=${encodeURIComponent(userEmail)}`,
-          { to: leadEmail, subject, body, thread_id: selectedThread?.threadId 
-          }
-        );
-      }
+      // ALWAYS send as multipart/form-data so backend Form(...) fields are read
+      const fd = new FormData();
+      fd.append("to", leadEmail);
+      fd.append("subject", subject);
+      fd.append("body", body);
+      if (selectedThread?.threadId) fd.append("threadId", selectedThread.threadId); // <-- ensure 'threadId'
+
+      attachments.forEach((f) => fd.append("attachments", f, f.name));
+
+      await axiosClient.post(
+        `/integrations/gmail/reply?user_email=${encodeURIComponent(userEmail)}`,
+        fd,
+        { headers: { "Content-Type": "multipart/form-data" } }
+      );
+
       setSubject(""); setBody(""); setAttachments([]);
       localStorage.removeItem(DRAFT_KEY(leadId));
       await loadMessages();
@@ -210,7 +224,10 @@ export default function MailPanel({ lead, onClose }) {
               const active = selectedThreadKey === t.key;
               return (
                 <div key={t.key}
-                  onClick={() => setSelectedThreadKey(t.key)}
+                  onClick={() => {
+                    setSelectedThreadKey(t.key);
+                    if (t.threadId) markThreadAsRead(t.threadId); // <-- mark read on open
+                  }}
                   className={`p-3 border-b border-white/5 cursor-pointer ${active ? "bg-white/10" : "hover:bg-white/5"}`}>
                   <div className="flex items-start justify-between">
                     <div className="min-w-0">
