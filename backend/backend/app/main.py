@@ -92,7 +92,7 @@ app.include_router(users.router, prefix="/users", tags=["Users"])
 app.include_router(leads.router, prefix="/leads", tags=["Leads"])
 app.include_router(tasks.router, prefix="/tasks", tags=["Tasks"])
 app.include_router(activities.router, prefix="/activities", tags=["Activities"])
-app.include_router(orders.router, prefix="/orders", tags=["Orders"])
+app.include_router(order.router, prefix="/orders", tags=["Orders"])
 
 # ----------------------------------------------------
 # ✅ STARTUP EVENT
