@@ -1,134 +1,92 @@
-# app/main.py
+import os
+import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.openapi.utils import get_openapi
-import logging
-from app.db.session import Base, engine
-from app import models
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response, JSONResponse
+from starlette.requests import Request
 
-# ---------------------------------------------------------------------------
-# 1️⃣  Create App
-# ---------------------------------------------------------------------------
+from .routers import auth, users, leads, tasks, activities, quotations, orders
+from .routers.integrations import google_auth
+from .routers import ai_insights, ai_router
+
+log = logging.getLogger(__name__)
+logging.basicConfig(level=logging.WARNING)
+
+BACKEND_BASE_URL = os.getenv("BACKEND_BASE_URL", "").rstrip("/")
+FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "").rstrip("/")
+
+# Render + local defaults
+_default_frontends = {
+    "http://localhost:4173",
+    "http://127.0.0.1:4173",
+    "http://192.168.29.70:4173",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://192.168.29.70:5173",
+}
+if FRONTEND_BASE_URL:
+    _default_frontends.add(FRONTEND_BASE_URL)
+
+origins = sorted(_default_frontends)
+
 app = FastAPI(
     title="Uplift CRM vPro API",
     version="1.0.0",
-    description="Backend API for Uplift CRM vPro with full JWT Authentication and Multi-Tenant architecture.",
-    swagger_ui_parameters={"persistAuthorization": True},
 )
 
-# ---------------------------------------------------------------------------
-# 2️⃣  Apply CORS Middleware
-# ---------------------------------------------------------------------------
-origins = [
-    "http://localhost",
-    "http://localhost:5173",
-    "http://localhost:4173",   # ✅ your dev frontend
-    "http://192.168.29.70:4173",  # ✅ LAN frontend
-    "https://uplift-crm-backend.onrender.com",
-    "https://uplift-crm-ui.onrender.com"
-]
-
+# --- CORS must be first ---
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"]
+    allow_headers=["*"],
+    expose_headers=["*"],
 )
 
-logging.warning("✅ CORS middleware loaded (localhost + LAN + Render enabled)")
+# --- Safety net: if something raises deep in the stack, still attach CORS ---
+class EnsureCorsMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        try:
+            resp = await call_next(request)
+        except Exception as e:
+            # Convert to JSON 500 but still attach CORS
+            log.exception("Unhandled error")
+            resp = JSONResponse({"detail": "Internal Server Error"}, status_code=500)
+        # Mirror CORS for known local dev origins
+        origin = request.headers.get("origin", "")
+        if any(origin.startswith(o) for o in origins):
+            resp.headers.setdefault("Access-Control-Allow-Origin", origin)
+            resp.headers.setdefault("Vary", "Origin")
+            if "credentials" in resp.headers.get("Access-Control-Allow-Credentials", "").lower() or True:
+                resp.headers["Access-Control-Allow-Credentials"] = "true"
+        return resp
 
-# ---------------------------------------------------------------------------
-# 3️⃣  Import Routers
-# ---------------------------------------------------------------------------
-from app.routers import (
-    auth,
-    leads,
-    tasks,
-    quotation,
-    order,
-    dashboard,
-    company_profile,
-    users,
-    activities,
-    activity_overview,
-    ai_router,
-    ai_insights,
-)
-from app.routers.integrations import google_auth, gmail_integration
-from app.routers import ai_gmail  # ✅ AI Gmail Summarize + Suggest Router
+app.add_middleware(EnsureCorsMiddleware)
 
-# ---------------------------------------------------------------------------
-# 4️⃣  Database Init
-# ---------------------------------------------------------------------------
-logging.warning("🔄 Syncing database tables…")
-Base.metadata.create_all(bind=engine)
-logging.warning("✅ Tables ready!")
+# --- Routers ---
+app.include_router(auth.router, prefix="", tags=["auth"])
+app.include_router(google_auth.router, prefix="", tags=["google-oauth"])
+app.include_router(users.router, prefix="/users", tags=["users"])
+app.include_router(leads.router, prefix="/leads", tags=["leads"])
+app.include_router(tasks.router, prefix="/tasks", tags=["tasks"])
+app.include_router(activities.router, prefix="/activities", tags=["activities"])
+app.include_router(quotations.router, prefix="/quotations", tags=["quotations"])
+app.include_router(orders.router, prefix="/orders", tags=["orders"])
+app.include_router(ai_router.router, prefix="/ai", tags=["ai"])
+app.include_router(ai_insights.router, prefix="/ai", tags=["ai-insights"])
 
-# ---------------------------------------------------------------------------
-# 5️⃣  Custom OpenAPI (JWT BearerAuth in Docs)
-# ---------------------------------------------------------------------------
-def custom_openapi():
-    if app.openapi_schema:
-        return app.openapi_schema
-    schema = get_openapi(
-        title=app.title,
-        version=app.version,
-        description=app.description,
-        routes=app.routes,
-    )
-    schema.setdefault("components", {}).setdefault("securitySchemes", {})
-    schema["components"]["securitySchemes"]["BearerAuth"] = {
-        "type": "http",
-        "scheme": "bearer",
-        "bearerFormat": "JWT",
-        "description": "Paste JWT from /auth/login.",
-    }
-    schema["security"] = [{"BearerAuth": []}]
-    app.openapi_schema = schema
-    return schema
+@app.get("/", tags=["health"])
+def health():
+    return {"ok": True, "backend": BACKEND_BASE_URL or "unset"}
 
-app.openapi_schema = None
-app.openapi = custom_openapi
-logging.warning("✅ OpenAPI BearerAuth configured")
+# Optional: HEAD/OPTIONS for health so mobile preflights don’t 405
+@app.head("/", tags=["health"])
+def head_health():
+    return Response(status_code=200)
 
-# ---------------------------------------------------------------------------
-# 6️⃣  Register Routers
-# ---------------------------------------------------------------------------
-app.include_router(auth.router)
-app.include_router(users.router)
-app.include_router(company_profile.router)
-app.include_router(leads.router)
-app.include_router(tasks.router)
-app.include_router(activities.router)
-app.include_router(activity_overview.router)
-app.include_router(quotation.router)
-app.include_router(order.router)
-app.include_router(dashboard.router)
-app.include_router(google_auth.router)
-app.include_router(gmail_integration.router)
-app.include_router(ai_router.router)
-app.include_router(ai_insights.router)
-app.include_router(ai_gmail.router)
-
-logging.warning("✅ Routers registered successfully")
-
-# ---------------------------------------------------------------------------
-# 7️⃣  Health Check
-# ---------------------------------------------------------------------------
-@app.get("/")
-def root():
-    return {"message": "🚀 Uplift CRM vPro backend is running on Render!"}
-
-# ---------------------------------------------------------------------------
-# 8️⃣  Run Server (for local dev)
-# ---------------------------------------------------------------------------
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(
-        "app.main:app",
-        host="0.0.0.0",  # allows both localhost & LAN (192.168.x.x)
-        port=8000,
-        reload=True,
-        log_level="info",
-    )
+@app.options("/{rest_of_path:path}")
+def options_catch_all(rest_of_path: str):
+    return Response(status_code=200)
