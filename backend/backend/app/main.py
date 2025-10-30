@@ -9,7 +9,7 @@ from app.routers import (
     leads,
     tasks,
     activities,
-    orders,
+    order,
 )
 from app.core.config import settings
 
