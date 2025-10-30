@@ -2,12 +2,14 @@ from datetime import datetime, timedelta
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer, OAuth2PasswordRequestForm
+from fastapi.responses import RedirectResponse
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
+# Internal imports
 from app.core.config import settings
 from app.db.session import get_db
 from app.models.user import User
@@ -85,7 +87,7 @@ def get_current_user(
 
 # ===================== Routes =====================
 
-@router.post("/signup", summary="Register new company and admin user")
+@router.post("/signup", summary="Register new company and admin user", name="auth_signup")
 def signup(payload: dict, db: Session = Depends(get_db)):
     """
     Body Example:
@@ -155,7 +157,7 @@ def signup(payload: dict, db: Session = Depends(get_db)):
 # ==========================================================
 #  ✅ Robust OAuth2 Login (Form-data compatible with Swagger)
 # ==========================================================
-@router.post("/login", summary="Login (Generate JWT)")
+@router.post("/login", summary="Login (Generate JWT)", name="auth_login")
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     """
     Accepts form-data (Swagger-compatible):
@@ -189,6 +191,7 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
 @router.get(
     "/me",
     summary="Get Logged-In User Info",
+    name="auth_me",
     openapi_extra={"security": [{"BearerAuth": []}]},
 )
 def get_me(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -208,21 +211,20 @@ def get_me(current_user: User = Depends(get_current_user), db: Session = Depends
             "footer_note": getattr(company, "footer_note", None),
         },
     }
+
+
 # ==========================================================
 #  🌐 GOOGLE OAUTH LOGIN (LIVE READY FOR RENDER)
 # ==========================================================
 from os import getenv
-from fastapi import Request
-from fastapi.responses import RedirectResponse
 from google_auth_oauthlib.flow import Flow
-
 import pathlib
 
-GOOGLE_CLIENT_ID = getenv("GOOGLE_OAUTH_CLIENT_ID")
-GOOGLE_CLIENT_SECRET = getenv("GOOGLE_OAUTH_CLIENT_SECRET")
-BACKEND_URL = getenv("BACKEND_URL", "https://uplift-crm-backend.onrender.com")
-FRONTEND_URL = getenv("FRONTEND_URL", "http://localhost:4173")
-GOOGLE_REDIRECT_URI = getenv("GOOGLE_OAUTH_REDIRECT_URI", f"{BACKEND_URL}/auth/google/callback")
+GOOGLE_CLIENT_ID = getenv("GOOGLE_OAUTH_CLIENT_ID") or getenv("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = getenv("GOOGLE_OAUTH_CLIENT_SECRET") or getenv("GOOGLE_CLIENT_SECRET")
+BACKEND_URL = getenv("BACKEND_URL", settings.BACKEND_BASE_URL if hasattr(settings, "BACKEND_BASE_URL") else "https://uplift-crm-backend.onrender.com")
+FRONTEND_URL = getenv("FRONTEND_URL", getattr(settings, "FRONTEND_BASE_URL", None) or "http://localhost:4173")
+GOOGLE_REDIRECT_URI = getenv("GOOGLE_OAUTH_REDIRECT_URI") or f"{BACKEND_URL}/auth/google/callback"
 
 # ✅ OAuth Flow Configuration
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
@@ -235,11 +237,14 @@ SCOPES = [
     "https://www.googleapis.com/auth/gmail.modify",
 ]
 
-@router.get("/google", summary="Start Google OAuth flow")
+@router.get("/google", summary="Start Google OAuth flow", name="auth_google_start")
 def google_login():
     """
     Redirect user to Google OAuth consent screen.
     """
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        raise HTTPException(status_code=500, detail="Google OAuth not configured")
+
     flow = Flow.from_client_config(
         {
             "web": {
@@ -258,11 +263,14 @@ def google_login():
     return RedirectResponse(auth_url)
 
 
-@router.get("/google/callback", summary="Handle Google OAuth callback")
+@router.get("/google/callback", summary="Handle Google OAuth callback", name="auth_google_callback")
 def google_callback(request: Request):
     """
     Handle Google OAuth redirect after login.
     """
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        raise HTTPException(status_code=500, detail="Google OAuth not configured")
+
     flow = Flow.from_client_config(
         {
             "web": {
@@ -279,15 +287,22 @@ def google_callback(request: Request):
     flow.redirect_uri = GOOGLE_REDIRECT_URI
 
     # Exchange code for tokens
-    flow.fetch_token(authorization_response=str(request.url))
+    try:
+        flow.fetch_token(authorization_response=str(request.url))
+    except Exception as e:
+        # If "code" missing in URL or invalid, surface a cleaner message
+        raise HTTPException(status_code=400, detail=f"OAuth callback error: {e}")
 
     # Extract user info
     credentials = flow.credentials
-    from googleapiclient.discovery import build
-    oauth2 = build("oauth2", "v2", credentials=credentials)
-    user_info = oauth2.userinfo().get().execute()
+    try:
+        from googleapiclient.discovery import build
+        oauth2 = build("oauth2", "v2", credentials=credentials)
+        user_info = oauth2.userinfo().get().execute()
+    except Exception:
+        user_info = {}
 
-    # TODO: you can create or fetch user in DB here
+    # TODO: upsert user using user_info if needed
 
     # Redirect to frontend (post-login success)
-    return RedirectResponse(f"{FRONTEND_URL}/")
+    return RedirectResponse(f"{FRONTEND_URL}/")  # You can include a success flag/query if needed
