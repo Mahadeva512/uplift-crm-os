@@ -25,11 +25,13 @@ origins = [
     "http://127.0.0.1:5173",
     "http://192.168.29.70",
     "http://192.168.29.70:5173",
+    "http://192.168.29.70:4173",
     "http://0.0.0.0:5173",
     "http://10.70.190.116",
-    "http://10.70.190.116:5173",  # 👈 your current frontend URL
-,
+    "http://10.70.190.116:5173",
     "http://localhost:4173",
+    "https://uplift-crm-backend.onrender.com",
+    "https://uplift-crm-ui.onrender.com",
 ]
 
 app.add_middleware(
@@ -37,9 +39,10 @@ app.add_middleware(
     allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*"]
 )
-logging.warning("✅ CORS middleware loaded (localhost + LAN enabled)")
+
+logging.warning("✅ CORS middleware loaded (localhost + LAN + Render enabled)")
 
 # ---------------------------------------------------------------------------
 # 3️⃣  Import Routers
@@ -59,7 +62,7 @@ from app.routers import (
     ai_insights,
 )
 from app.routers.integrations import google_auth, gmail_integration
-from app.routers import ai_gmail  # ✅ ADDED: AI Gmail Summarize + Suggest Router
+from app.routers import ai_gmail  # ✅ AI Gmail Summarize + Suggest Router
 
 # ---------------------------------------------------------------------------
 # 4️⃣  Database Init
@@ -112,10 +115,8 @@ app.include_router(google_auth.router)
 app.include_router(gmail_integration.router)
 app.include_router(ai_router.router)
 app.include_router(ai_insights.router)
-app.include_router(ai_gmail.router)  # ✅ Injected correctly for /ai/gmail/*
+app.include_router(ai_gmail.router)
 
-# ✅ Force Swagger to rebuild
-app.openapi_schema = None
 logging.warning("✅ Routers registered successfully")
 
 # ---------------------------------------------------------------------------
@@ -123,10 +124,10 @@ logging.warning("✅ Routers registered successfully")
 # ---------------------------------------------------------------------------
 @app.get("/")
 def root():
-    return {"message": "Uplift CRM vPro backend is running!"}
+    return {"message": "🚀 Uplift CRM vPro backend is running on Render!"}
 
 # ---------------------------------------------------------------------------
-# 8️⃣  Run Server
+# 8️⃣  Run Server (for local dev)
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
