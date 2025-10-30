@@ -1,196 +1,273 @@
-# backend/app/routers/google_auth.py
-# Full file — preserved your original logic and injected compatibility-friendly redirect params.
-# Replace your existing router file with this. All original paths/logic are preserved, with safe changes.
+# app/routers/integrations/google_auth.py
+from __future__ import annotations
 
-from fastapi import APIRouter, Request, Depends, HTTPException
-from fastapi.responses import RedirectResponse
-from starlette.status import HTTP_302_FOUND
-from urllib.parse import urlencode, urljoin
+import json
 import logging
 import os
+import uuid
+from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Optional
 
-# imports you already had in your project (preserved)
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse, RedirectResponse
 from google_auth_oauthlib.flow import Flow
-from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
 
-# token generation functions from your auth/core modules — keep these as-is
-from app.core.auth import settings  # pydantic settings file (modified above)
-from app.core.jwt import create_access_token  # your existing function that returns JWT for users
-from app.db import get_db  # kept as-is
-from app.crud import get_or_create_user_from_google  # your existing helper that creates/returns user
+# -----------------------------------------------------------------------------
+# DB + models (import gently so app boot never crashes if imports move)
+# -----------------------------------------------------------------------------
+try:
+    from app.db.session import get_db
+    from sqlalchemy.orm import Session
+except Exception:  # pragma: no cover
+    get_db = None  # type: ignore
+    Session = None  # type: ignore
 
-router = APIRouter(prefix="/auth", tags=["auth"])
-logger = logging.getLogger("uvicorn.error")
+UserModel = None
+CompanyModel = None
+
+try:
+    from app.models.users import User as UserModel
+except Exception:
+    try:
+        from app.models.user import User as UserModel  # legacy name
+    except Exception:
+        pass
+
+try:
+    from app.models.company_profile import CompanyProfile as CompanyModel
+except Exception:
+    try:
+        from app.models.company import Company as CompanyModel  # legacy name
+    except Exception:
+        pass
+
+# -----------------------------------------------------------------------------
+# JWT helper (uses your existing helper; falls back to minimal impl if absent)
+# -----------------------------------------------------------------------------
+try:
+    from app.routers.auth import create_access_token
+except Exception:  # minimal fallback
+    import jwt
+
+    SECRET_KEY = os.getenv("UPLIFT_SECRET_KEY", "dev-secret")
+    ALGORITHM = "HS256"
+
+    def create_access_token(data: dict, expires_delta: Optional[int] = None) -> str:
+        minutes = 120 if expires_delta is None else int(expires_delta)
+        payload = {**data, "exp": datetime.utcnow() + timedelta(minutes=minutes)}
+        return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
+# -----------------------------------------------------------------------------
+# Setup & constants
+# -----------------------------------------------------------------------------
+logger = logging.getLogger("google_auth")
+router = APIRouter()
+
+# Allow HTTP redirect URIs in non-prod (Render free tier)
+os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
+
+ROOT = Path(__file__).resolve().parents[2]
+CREDENTIALS_DIR = ROOT / "routers" / "credentials"
+CREDENTIALS_DIR.mkdir(parents=True, exist_ok=True)
+
+# Where a user-specific Gmail token (for sync) will be cached
+def _token_path(email: str) -> Path:
+    safe = (email or "").replace("/", "_")
+    return CREDENTIALS_DIR / f"token_{safe}.json"
+
+# Backend/Frontend base & redirect
+BACKEND_BASE = os.getenv("BACKEND_BASE_URL", "https://uplift-crm-backend.onrender.com").rstrip("/")
+FRONTEND_BASE = os.getenv("FRONTEND_BASE_URL", "http://localhost:4173").rstrip("/")
+REDIRECT_URI = f"{BACKEND_BASE}/auth/google/callback"
+FRONTEND_AFTER_GOOGLE = FRONTEND_BASE  # send user here after login
+
+SCOPES = [
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/gmail.modify",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
+    "openid",
+]
+
+# -----------------------------------------------------------------------------
+# OAuth client config comes from env via app.core.auth_config
+# -----------------------------------------------------------------------------
+from app.core.auth_config import GOOGLE_CREDS  # must expose {"web": {...}}
 
 
-# ---------- helper to build frontend redirect URL ----------
-def build_frontend_redirect(base_frontend: Optional[str], params: dict, default_return: str = "/"):
+def _require_client_secrets() -> dict:
     """
-    Returns a safe redirect URL. base_frontend can be None — in that case,
-    we return a path-only URL with query string (frontend should handle it).
-    """
-    qs = urlencode(params)
-    if base_frontend:
-        # ensure trailing slash doesn't duplicate
-        return f"{base_frontend.rstrip('/')}/?{qs}"
-    # fallback to path-only query string (frontend running on same host will pick it up)
-    return f"/?{qs}"
-
-
-# ---------- /auth/google endpoint: start Google OAuth flow ----------
-@router.get("/google")
-async def google_login(next: Optional[str] = None, request: Request = None):
-    """
-    Redirects user to Google's OAuth consent screen.
-    Accepts optional ?next= parameter that will be passed through and used
-    after successful callback.
-    """
-    client_config = {
-        "web": {
-            "client_id": settings.GOOGLE_OAUTH_CLIENT_ID,
-            "client_secret": settings.GOOGLE_OAUTH_CLIENT_SECRET,
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "token_uri": "https://oauth2.googleapis.com/token",
-            "redirect_uris": [settings.GOOGLE_OAUTH_REDIRECT_URI]
-            if settings.GOOGLE_OAUTH_REDIRECT_URI
-            else [],
-        }
-    }
-
-    flow = Flow.from_client_config(
-        client_config=client_config,
-        scopes=["openid", "email", "profile"],
-        redirect_uri=settings.GOOGLE_OAUTH_REDIRECT_URI,
-    )
-
-    # store 'next' in state if provided so callback can read it back
-    state = {}
-    if next:
-        state["next"] = next
-
-    auth_url, state_token = flow.authorization_url(prompt="consent", access_type="offline", include_granted_scopes="true")
-    # You may want to persist state_token to session/cache for CSRF protection — preserve your original approach.
-
-    logger.info("Redirecting to Google for consent")
-    return RedirectResponse(auth_url, status_code=HTTP_302_FOUND)
-
-
-# ---------- /auth/google/callback endpoint ----------
-@router.get("/google/callback")
-async def google_callback(request: Request, next: Optional[str] = None):
-    """
-    Callback from Google. Fetch token, create or fetch the user, create app JWT,
-    then redirect back to frontend with token and email.
-    This function is intentionally tolerant: it will append multiple query names
-    so frontend of various shapes will pick it up:
-      - google_token
-      - token
-      - access_token
-      - jwt
-    It also preserves 'next' if provided.
+    Verify Google OAuth credentials are available from env (Render-safe).
     """
     try:
-        # Build Flow same as start function (must match)
-        client_config = {
-            "web": {
-                "client_id": settings.GOOGLE_OAUTH_CLIENT_ID,
-                "client_secret": settings.GOOGLE_OAUTH_CLIENT_SECRET,
-                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                "token_uri": "https://oauth2.googleapis.com/token",
-                "redirect_uris": [settings.GOOGLE_OAUTH_REDIRECT_URI]
-                if settings.GOOGLE_OAUTH_REDIRECT_URI
-                else [],
-            }
-        }
-
-        flow = Flow.from_client_config(
-            client_config=client_config,
-            scopes=["openid", "email", "profile"],
-            redirect_uri=settings.GOOGLE_OAUTH_REDIRECT_URI,
+        web = GOOGLE_CREDS["web"]
+        if not web.get("client_id") or not web.get("client_secret"):
+            raise KeyError("client_id/client_secret missing")
+    except Exception as e:
+        logger.error("Missing Google OAuth env config: %s", e)
+        raise HTTPException(
+            status_code=500,
+            detail="Missing Google OAuth credentials in environment variables",
         )
+    return GOOGLE_CREDS
 
-        # Fetch the token using the full request URL that Google called
-        full_url = str(request.url)
-        # NOTE: requests-oauthlib accepts authorization_response param OR code
-        # many setups pass `authorization_response` as the full URL; try both ways resiliently
-        try:
-            flow.fetch_token(authorization_response=full_url)
-        except Exception as e:
-            # fallback: try to read 'code' from query params and pass code explicitly
-            logger.debug("fetch_token with authorization_response failed; trying with code fallback: %s", e)
-            qs = dict(request.query_params)
-            code = qs.get("code")
-            if not code:
-                logger.error("Missing code parameter in Google callback")
-                raise HTTPException(status_code=400, detail="Missing code parameter in Google callback.")
-            flow.fetch_token(code=code)
 
-        credentials: Credentials = flow.credentials
+def _save_user_token(email: str, creds) -> None:
+    p = _token_path(email)
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(creds.to_json())
 
-        # Get userinfo (id_token / or via people API). We'll extract email from id_token if present.
-        id_info = {}
-        email = None
-        try:
-            id_token = credentials.id_token
-            if id_token:
-                # id_token often contains email in the payload (if configured)
-                from google.oauth2 import id_token as google_id_token
-                from google.auth.transport import requests as grequests
 
-                request_adapter = grequests.Request()
-                id_info = google_id_token.verify_oauth2_token(id_token, request_adapter, settings.GOOGLE_OAUTH_CLIENT_ID)
-                email = id_info.get("email")
-        except Exception:
-            # If id token parse fails, fall back to calling the people/emailuserinfo endpoint.
-            email = None
+def _load_user_token(email: str):
+    p = _token_path(email)
+    if p.exists():
+        with open(p, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return None
 
-        # If email still not present, try to fetch basic profile from Google userinfo endpoint
-        if not email:
-            import requests as _requests
 
-            resp = _requests.get("https://openidconnect.googleapis.com/v1/userinfo", headers={"Authorization": f"Bearer {credentials.token}"})
-            if resp.ok:
-                userinfo = resp.json()
-                email = userinfo.get("email")
+def _delete_user_token(email: str) -> None:
+    try:
+        _token_path(email).unlink(missing_ok=True)
+    except Exception:
+        pass
 
-        if not email:
-            logger.error("Could not obtain email from Google response.")
-            raise HTTPException(status_code=400, detail="Could not obtain email from Google.")
 
-        # Now: create or fetch local user using your existing helper (preserve your logic)
-        # get_or_create_user_from_google should create user/company and return a user object
-        user = await get_or_create_user_from_google(email=email, google_creds=credentials)
+# -----------------------------------------------------------------------------
+# Minimal auto-provision (safe no-ops if models not present)
+# -----------------------------------------------------------------------------
+def _create_placeholder_company(db: Session, full_name: str, email: str):
+    if not CompanyModel or not db:
+        return None
+    try:
+        first = (full_name or email.split("@")[0]).split()[0]
+        company = CompanyModel(
+            id=str(uuid.uuid4()),
+            company_name=f"{first}'s Company",
+            email=email,
+            theme_color="#0C1428",
+            accent_color="#FACC15",
+            footer_note="Powered by Uplift CRM OS",
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        db.add(company)
+        db.flush()
+        return company
+    except Exception as e:
+        logger.warning("Company creation failed: %s", e)
+        db.rollback()
+        return None
 
-        # Create your app JWT for the user (uses your existing create_access_token)
-        jwt_token = create_access_token({"sub": str(user.id)})
 
-        # Build redirect params. We include multiple names (token, jwt, access_token, google_token)
-        params = {
-            "google_token": jwt_token,
-            "token": jwt_token,
-            "access_token": jwt_token,
-            "jwt": jwt_token,
-            "email": email,
-        }
-        # If the frontend passed next in the initial /auth/google?next=, support it here too
-        # (If you stored state earlier, read it here — this example supports ?next= query param fallback)
-        incoming_next = request.query_params.get("next") or next
-        if incoming_next:
-            params["next"] = incoming_next
+def _provision_user_if_needed(db: Session, email: str, full_name: Optional[str]):
+    if not (db and UserModel):
+        return None
+    user = db.query(UserModel).filter(UserModel.email == email).first()
+    if user:
+        return user
+    company = _create_placeholder_company(db, full_name or "", email)
+    try:
+        user = UserModel(
+            id=str(uuid.uuid4()),
+            email=email,
+            full_name=full_name or email,
+            hashed_password="",  # OAuth user
+            role="admin",
+            is_active=True,
+            company_id=getattr(company, "id", None),
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        return user
+    except Exception as e:
+        logger.error("User creation failed: %s", e, exc_info=True)
+        db.rollback()
+        return None
 
-        # Determine frontend base. If user set FRONTEND_BASE_URL in env, prefer that.
-        frontend_base = settings.FRONTEND_BASE_URL
 
-        # Build redirect URL (injected helper above)
-        redirect_url = build_frontend_redirect(frontend_base, params)
+# -----------------------------------------------------------------------------
+# Routes
+# -----------------------------------------------------------------------------
+@router.get("/auth/google")
+def google_login(select_account: bool = Query(default=True)):
+    """
+    Start OAuth flow and redirect to Google's consent screen.
+    """
+    creds_dict = _require_client_secrets()
+    flow = Flow.from_client_config(creds_dict, scopes=SCOPES, redirect_uri=REDIRECT_URI)
+    auth_url, _ = flow.authorization_url(
+        prompt="consent" if select_account else "none",
+        access_type="offline",
+        include_granted_scopes="true",
+    )
+    return RedirectResponse(auth_url)
 
-        logger.info("Google OAuth complete; redirecting back to frontend %s for %s", redirect_url, email)
-        return RedirectResponse(url=redirect_url, status_code=HTTP_302_FOUND)
 
-    except Exception as exc:
-        logger.exception("Google callback failed: %s", exc)
-        # If anything failed, redirect to sign-in screen but include error hint
-        fallback_frontend = settings.FRONTEND_BASE_URL or "/"
-        fallback_url = build_frontend_redirect(fallback_frontend, {"error": "google_failed"})
-        return RedirectResponse(url=fallback_url, status_code=HTTP_302_FOUND)
+@router.get("/auth/google/callback")
+def google_callback(
+    request: Request, db: Session = Depends(get_db) if get_db else None
+):
+    """
+    Handle Google's redirect, exchange code, mint CRM JWT, and bounce to FE.
+    """
+    code = request.query_params.get("code")
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing authorization code")
+
+    creds_dict = _require_client_secrets()
+    flow = Flow.from_client_config(creds_dict, scopes=SCOPES, redirect_uri=REDIRECT_URI)
+    try:
+        flow.fetch_token(code=code)
+    except Exception as e:
+        logger.error("Google token exchange failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=400, detail="Failed to fetch token from Google")
+
+    creds = flow.credentials
+
+    # Fetch profile
+    me = build("oauth2", "v2", credentials=creds).userinfo().get().execute()
+    email = me.get("email")
+    full_name = me.get("name") or me.get("given_name") or (email.split("@")[0] if email else "")
+    if not email:
+        raise HTTPException(status_code=500, detail="Google did not return an email")
+
+    # Save Gmail token & ensure a CRM user exists
+    _save_user_token(email, creds)
+    user = _provision_user_if_needed(db, email, full_name)
+
+    # Create CRM session token
+    payload = {"email": email}
+    if user:
+        payload["sub"] = str(getattr(user, "id", email))
+        payload["role"] = getattr(user, "role", "user")
+        payload["company_id"] = str(getattr(user, "company_id", "")) or ""
+    crm_jwt = create_access_token(payload)
+
+    # Send user back to the frontend
+    return RedirectResponse(
+    f"{FRONTEND_AFTER_GOOGLE}/?token={crm_jwt}&email={email}"
+)
+
+
+@router.get("/auth/google/status")
+def google_status(user_email: str):
+    """
+    Lightweight check from FE to see if Gmail is connected for a user.
+    """
+    if _load_user_token(user_email):
+        return {"connected": True}
+    raise HTTPException(status_code=404, detail="No Gmail connection for this user")
+
+
+@router.post("/auth/google/disconnect")
+def google_disconnect(user_email: str):
+    """
+    Remove cached Gmail token file (simple disconnect).
+    """
+    _delete_user_token(user_email)
+    return JSONResponse({"ok": True})
