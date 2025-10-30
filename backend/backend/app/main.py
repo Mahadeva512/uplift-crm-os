@@ -22,16 +22,10 @@ app = FastAPI(
 origins = [
     "http://localhost",
     "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://192.168.29.70",
-    "http://192.168.29.70:5173",
-    "http://192.168.29.70:4173",
-    "http://0.0.0.0:5173",
-    "http://10.70.190.116",
-    "http://10.70.190.116:5173",
-    "http://localhost:4173",
+    "http://localhost:4173",   # ✅ your dev frontend
+    "http://192.168.29.70:4173",  # ✅ LAN frontend
     "https://uplift-crm-backend.onrender.com",
-    "https://uplift-crm-ui.onrender.com",
+    "https://uplift-crm-ui.onrender.com"
 ]
 
 app.add_middleware(
