@@ -103,3 +103,28 @@ def upsert_profile(
     db.commit()
     db.refresh(company)
     return company
+# ===========================================================
+# 👇 Add this at the END of app/routers/company_profile.py
+# It provides a /profile alias for the frontend dashboard
+# ===========================================================
+
+from fastapi import APIRouter, Depends, HTTPException
+from app.db.session import get_db
+from app.models.company_profile import CompanyProfile
+from app.models.user import User
+from app.routers.auth import get_current_user
+from sqlalchemy.orm import Session
+
+@router.get("/profile", include_in_schema=False)
+def get_company_alias_profile(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    company = (
+        db.query(CompanyProfile)
+        .filter(CompanyProfile.id == current_user.company_id)
+        .first()
+    )
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+    return company
