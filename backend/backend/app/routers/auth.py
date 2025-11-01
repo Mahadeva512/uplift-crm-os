@@ -212,21 +212,27 @@ def get_me(current_user: User = Depends(get_current_user), db: Session = Depends
         },
     }
 
-
 # ==========================================================
-#  🌐 GOOGLE OAUTH LOGIN (LIVE READY FOR RENDER)
+#  🌐 GOOGLE OAUTH LOGIN (LIVE READY FOR RENDER) — FIXED
 # ==========================================================
 from os import getenv
 from google_auth_oauthlib.flow import Flow
-import pathlib
+import pathlib, json, base64, secrets
+from sqlalchemy.orm import Session
+from fastapi import Depends, Request
+from fastapi.responses import RedirectResponse
+
+from app.db.session import get_db
+from app.models.user import User
+from app.models.company_profile import CompanyProfile
 
 GOOGLE_CLIENT_ID = getenv("GOOGLE_OAUTH_CLIENT_ID") or getenv("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = getenv("GOOGLE_OAUTH_CLIENT_SECRET") or getenv("GOOGLE_CLIENT_SECRET")
-BACKEND_URL = getenv("BACKEND_URL", settings.BACKEND_BASE_URL if hasattr(settings, "BACKEND_BASE_URL") else "https://uplift-crm-backend.onrender.com")
+
+BACKEND_URL = getenv("BACKEND_URL", getattr(settings, "BACKEND_BASE_URL", None) or "https://uplift-crm-backend.onrender.com")
 FRONTEND_URL = getenv("FRONTEND_URL", getattr(settings, "FRONTEND_BASE_URL", None) or "http://localhost:4173")
 GOOGLE_REDIRECT_URI = getenv("GOOGLE_OAUTH_REDIRECT_URI") or f"{BACKEND_URL}/auth/google/callback"
 
-# ✅ OAuth Flow Configuration
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
 SCOPES = [
     "openid",
@@ -237,14 +243,9 @@ SCOPES = [
     "https://www.googleapis.com/auth/gmail.modify",
 ]
 
-@router.get("/google", summary="Start Google OAuth flow", name="auth_google_start")
-def google_login():
-    """
-    Redirect user to Google OAuth consent screen.
-    """
+def _flow():
     if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
         raise HTTPException(status_code=500, detail="Google OAuth not configured")
-
     flow = Flow.from_client_config(
         {
             "web": {
@@ -257,52 +258,95 @@ def google_login():
         },
         scopes=SCOPES,
     )
-
     flow.redirect_uri = GOOGLE_REDIRECT_URI
-    auth_url, _ = flow.authorization_url(prompt="consent", access_type="offline", include_granted_scopes="true")
+    return flow
+
+def _encode_state(obj: dict) -> str:
+    raw = json.dumps(obj, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii")
+
+def _decode_state(s: str) -> dict:
+    try:
+        raw = base64.urlsafe_b64decode(s.encode("ascii"))
+        return json.loads(raw.decode("utf-8"))
+    except Exception:
+        return {}
+
+@router.get("/google", summary="Start Google OAuth flow", name="auth_google_start")
+def google_login(request: Request):
+    """
+    Preserve ?next=<url> by packing it into OAuth 'state'
+    """
+    flow = _flow()
+    next_url = request.query_params.get("next") or f"{FRONTEND_URL}/dashboard"
+    state = _encode_state({"next": next_url, "nonce": secrets.token_urlsafe(12)})
+    auth_url, _ = flow.authorization_url(
+        prompt="consent",
+        access_type="offline",
+        include_granted_scopes="true",
+        state=state,
+    )
     return RedirectResponse(auth_url)
 
-
 @router.get("/google/callback", summary="Handle Google OAuth callback", name="auth_google_callback")
-def google_callback(request: Request):
+def google_callback(request: Request, db: Session = Depends(get_db)):
     """
-    Handle Google OAuth redirect after login.
+    Exchange code -> credentials, upsert user, mint JWT, and redirect back with token.
     """
-    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
-        raise HTTPException(status_code=500, detail="Google OAuth not configured")
-
-    flow = Flow.from_client_config(
-        {
-            "web": {
-                "client_id": GOOGLE_CLIENT_ID,
-                "client_secret": GOOGLE_CLIENT_SECRET,
-                "redirect_uris": [GOOGLE_REDIRECT_URI],
-                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                "token_uri": "https://oauth2.googleapis.com/token",
-            }
-        },
-        scopes=SCOPES,
-    )
-
-    flow.redirect_uri = GOOGLE_REDIRECT_URI
+    flow = _flow()
 
     # Exchange code for tokens
     try:
         flow.fetch_token(authorization_response=str(request.url))
     except Exception as e:
-        # If "code" missing in URL or invalid, surface a cleaner message
         raise HTTPException(status_code=400, detail=f"OAuth callback error: {e}")
 
-    # Extract user info
-    credentials = flow.credentials
+    # Pull state for post-login redirect
+    state_raw = request.query_params.get("state") or ""
+    state = _decode_state(state_raw)
+    next_url = state.get("next") or f"{FRONTEND_URL}/dashboard"
+
+    # Fetch user profile
     try:
         from googleapiclient.discovery import build
-        oauth2 = build("oauth2", "v2", credentials=credentials)
-        user_info = oauth2.userinfo().get().execute()
+        oauth2 = build("oauth2", "v2", credentials=flow.credentials)
+        user_info = oauth2.userinfo().get().execute() or {}
     except Exception:
         user_info = {}
 
-    # TODO: upsert user using user_info if needed
+    email = (user_info.get("email") or "").lower().strip()
+    full_name = (user_info.get("name") or user_info.get("given_name") or "").strip()
+    if not email:
+        # Graceful fallback: send to login with an error
+        return RedirectResponse(f"{FRONTEND_URL}/login?error=google_no_email")
 
-    # Redirect to frontend (post-login success)
-    return RedirectResponse(f"{FRONTEND_URL}/")  # You can include a success flag/query if needed
+    # Upsert user (+ minimal company if needed)
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        company = CompanyProfile(
+            company_name=(email.split("@")[0] or "Uplift").title(),
+            email=email,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        db.add(company)
+        db.flush()
+        user = User(
+            email=email,
+            full_name=full_name or email.split("@")[0],
+            role="admin",
+            company_id=company.id,
+            hashed_password=pwd_context.hash(secrets.token_urlsafe(16)),  # random
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+    # Mint JWT and bounce to frontend with token + email
+    token = create_access_token({"sub": str(user.id), "email": user.email, "company_id": str(user.company_id)})
+
+    # Send as query params so your LoginScreen.jsx can persist them
+    redirect_with_token = f"{next_url}?access_token={token}&email={email}"
+    return RedirectResponse(redirect_with_token, status_code=302)
