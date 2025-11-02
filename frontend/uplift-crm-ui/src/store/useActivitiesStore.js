@@ -1,5 +1,6 @@
+// src/store/useActivitiesStore.js
 import { create } from "zustand";
-import * as api from "../api/activities";
+import apiClient from "@/api/apiClient";
 
 export const useActivitiesStore = create((set, get) => ({
   activities: [],
@@ -8,37 +9,43 @@ export const useActivitiesStore = create((set, get) => ({
   summary: null,
 
   fetchActivities: async (filters = {}) => {
-    set({ loading: true });
-    const data = await api.listActivities(filters);
-    // split into tasks vs completed activities (UI views)
-    set({
-      activities: data.filter(a => a.status === "Completed" || a.status === "Cancelled"),
-      tasks: data.filter(a => ["Planned","Pending","Overdue"].includes(a.status)),
-      loading: false
-    });
+    try {
+      set({ loading: true });
+      const { data } = await apiClient.get("/activities", { params: filters });
+      set({
+        activities: data.filter((a) => a.status === "Completed" || a.status === "Cancelled"),
+        tasks: data.filter((a) => ["Planned", "Pending", "Overdue"].includes(a.status)),
+        loading: false,
+      });
+    } catch (err) {
+      console.error("Failed to fetch activities:", err);
+      set({ loading: false });
+    }
   },
 
   completeTask: async (taskId, outcome) => {
-    const updated = await api.updateActivity(taskId, { status: "Completed", outcome });
-    // refetch to get auto-generated next task as well
+    const { data } = await apiClient.patch(`/activities/${taskId}`, {
+      status: "Completed",
+      outcome,
+    });
     await get().fetchActivities();
-    return updated;
+    return data;
   },
 
   addActivity: async (payload) => {
-    const a = await api.createActivity(payload);
+    const { data } = await apiClient.post("/activities", payload);
     await get().fetchActivities();
-    return a;
+    return data;
   },
 
   verifyActivity: async (payload) => {
-    const a = await api.verifyActivity(payload);
+    const { data } = await apiClient.post("/activities/verify", payload);
     await get().fetchActivities();
-    return a;
+    return data;
   },
 
   loadSummary: async () => {
-    const s = await api.summaryOverview();
-    set({ summary: s });
-  }
+    const { data } = await apiClient.get("/activities/summary");
+    set({ summary: data });
+  },
 }));

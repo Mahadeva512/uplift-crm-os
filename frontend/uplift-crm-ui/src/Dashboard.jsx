@@ -45,42 +45,46 @@ export default function Dashboard({ onLogout, onSwitch }) {
     const env = import.meta.env?.VITE_API_BASE_URL?.trim();
     if (env) return env.replace(/\/+$/, "");
     const host = window.location.hostname || "localhost";
-    return `http://${host}:8000`;
+    return "https://uplift-crm-backend.onrender.com";
   }, []);
 
   // 🧠 Load session + company
-  useEffect(() => {
-    const token = localStorage.getItem("uplift_token");
-    async function loadData() {
-      try {
-        const u = JSON.parse(localStorage.getItem("uplift_user") || "{}");
-        setUser(u);
+useEffect(() => {
+  const token = localStorage.getItem("uplift_token");
 
-        const res = await fetch(`${API_BASE}/company/profile`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setCompany(data);
-          localStorage.setItem("uplift_company", JSON.stringify(data));
-          if (
-            data?.company_name?.endsWith("’s Company") ||
-            data?.company_name?.endsWith("'s Company")
-          ) {
-            setShowCompanyModal(true);
-          }
-        } else {
-          setShowCompanyModal(true);
-        }
-      } catch (err) {
-        console.error("❌ Company load error:", err);
+  async function loadData() {
+    try {
+      const u = JSON.parse(localStorage.getItem("uplift_user") || "{}");
+      setUser(u);
+
+      const res = await fetch(`${API_BASE}/company/profile`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!res.ok) throw new Error("Profile fetch failed");
+      const data = await res.json();
+
+      // ✅ Save to state and localStorage
+      setCompany(data);
+      localStorage.setItem("uplift_company", JSON.stringify(data));
+
+      // ✅ Decide modal visibility only based on company_name
+      if (!data?.company_name || data?.company_name?.trim() === "") {
         setShowCompanyModal(true);
-      } finally {
-        setLoading(false);
+      } else {
+        setShowCompanyModal(false);
       }
+    } catch (err) {
+      console.error("❌ Company load error:", err);
+      setShowCompanyModal(true); // show only if truly failed
+    } finally {
+      setLoading(false);
     }
-    setTimeout(loadData, 400);
-  }, [API_BASE]);
+  }
+
+  // Small delay helps when token or API_BASE just updated
+  setTimeout(loadData, 400);
+}, [API_BASE]);
 
   // 🔧 Update company info
   async function updateCompany(data) {

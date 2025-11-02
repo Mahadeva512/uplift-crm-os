@@ -28,7 +28,7 @@ export default function SignUpScreen({ onSwitch }) {
     const env = import.meta.env?.VITE_API_BASE_URL?.trim();
     if (env) return env.replace(/\/+$/, "");
     const host = window.location.hostname || "localhost";
-    return `http://${host}:8000`;
+    return "https://uplift-crm-backend.onrender.com";
   }, []);
 
   // ---- Helpers ----

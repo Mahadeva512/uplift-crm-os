@@ -30,8 +30,11 @@ class CompanyProfileResponse(CompanyProfileBase):
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
 
-    class Config:
-        orm_mode = True  # allows SQLAlchemy → Pydantic conversion
+    from pydantic import BaseModel, ConfigDict
+
+class MyModel(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
 
 # -------------------------------------------------------------------
 # ✅ 3️⃣ Optional create schema for internal use (if needed later)

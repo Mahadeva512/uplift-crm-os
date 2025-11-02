@@ -1,4 +1,4 @@
-// App.jsx — Uplift CRM OS Core Navigation
+// App.jsx — Uplift CRM OS Core Navigation (Enhanced)
 import { useState, useEffect } from "react";
 import LoginScreen from "./LoginScreen";
 import SignUpScreen from "./SignUpScreen";
@@ -6,11 +6,17 @@ import Dashboard from "./Dashboard";
 import Leads from "./Leads";
 import ActivityCenter from "./pages/ActivityCenter"; // ✅ AI-powered Activity Center
 
+const API_BASE =
+  (import.meta.env?.VITE_API_BASE_URL?.trim() ||
+    import.meta.env?.VITE_API_URL?.trim() ||
+    "https://uplift-crm-backend.onrender.com").replace(/\/+$/, "");
+
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem("uplift_token"));
   const [screen, setScreen] = useState("login");
+  const [loading, setLoading] = useState(false);
 
-  // ✅ Auto-login check
+  // ✅ Auto-login check (from localStorage)
   useEffect(() => {
     const savedToken = localStorage.getItem("uplift_token");
     if (savedToken) {
@@ -19,64 +25,105 @@ export default function App() {
     }
   }, []);
 
-// ✅ Handle Google Sign-In redirect (detect ?google_token= in URL)
-useEffect(() => {
-  const urlParams = new URLSearchParams(window.location.search);
-  const googleToken = urlParams.get("google_token");
-  const email = urlParams.get("email");
+  // ✅ Handle Google / OAuth redirects
+  useEffect(() => {
+    const qp = new URLSearchParams(window.location.search);
+    const googleToken = qp.get("google_token");
+    const tokenParam = qp.get("token");
+    const code = qp.get("code");
+    const email = qp.get("email");
 
-  if (googleToken) {
-    console.log("✅ Google sign-in detected:", email);
-    localStorage.setItem("uplift_token", googleToken);
-    setToken(googleToken);
-    setScreen("dashboard");
-
-    // 🧠 Immediately fetch the user’s company profile
-    (async () => {
+    async function finalizeAuth(jwt) {
       try {
-        const API_BASE =
-          import.meta.env?.VITE_API_BASE_URL?.trim() ||
-          `http://${window.location.hostname}:8000`;
+        if (!jwt) return;
+        localStorage.setItem("uplift_token", jwt);
+        setToken(jwt);
+        setScreen("dashboard");
 
-        const res = await fetch(`${API_BASE}/company/profile`, {
-          headers: { Authorization: `Bearer ${googleToken}` },
+        // ✅ Verify session and sync profile
+        const res = await fetch(`${API_BASE}/auth/me`, {
+          headers: { Authorization: `Bearer ${jwt}` },
+          credentials: "include",
+        });
+        if (res.ok) {
+          const user = await res.json();
+          localStorage.setItem("uplift_user", JSON.stringify(user));
+        }
+
+        // ✅ Fetch company profile
+        const resCompany = await fetch(`${API_BASE}/company/profile`, {
+          headers: { Authorization: `Bearer ${jwt}` },
+        });
+        if (resCompany.ok) {
+          const company = await resCompany.json();
+          localStorage.setItem("uplift_company", JSON.stringify(company));
+          console.log("🏢 Company data synced:", company.company_name);
+        }
+
+        // ✅ Clean URL
+        window.history.replaceState({}, document.title, "/");
+      } catch (err) {
+        console.error("❌ Auth finalize error:", err);
+      }
+    }
+
+    // ✅ Handle direct token param
+    if (googleToken || tokenParam) {
+      finalizeAuth(googleToken || tokenParam);
+      return;
+    }
+
+    // ✅ Handle Google OAuth Code Flow
+    async function exchangeCodeForToken() {
+      try {
+        setLoading(true);
+        const redirect_uri = window.location.origin;
+        const url = new URL(`${API_BASE}/auth/google/callback`);
+        url.searchParams.set("code", code);
+        url.searchParams.set("redirect_uri", redirect_uri);
+
+        const res = await fetch(url.toString(), {
+          method: "GET",
+          credentials: "include",
         });
 
-        if (res.ok) {
-          const company = await res.json();
-          localStorage.setItem("uplift_company", JSON.stringify(company));
+        if (!res.ok) {
+          console.error("Google code exchange failed:", res.status);
+          return;
+        }
 
-          // Create a minimal user object (until /me endpoint added)
-          localStorage.setItem(
-            "uplift_user",
-            JSON.stringify({
-              email,
-              full_name: email?.split("@")[0] || "",
-            })
-          );
-
-          console.log("🏢 Company data synced:", company.company_name);
+        const data = await res.json();
+        const jwt = data?.token || data?.access_token;
+        if (jwt) {
+          await finalizeAuth(jwt);
         } else {
-          console.warn("⚠️ Could not fetch company profile:", res.status);
+          console.error("⚠️ No token in Google callback response:", data);
         }
       } catch (err) {
-        console.error("❌ Failed to load company info:", err);
+        console.error("❌ Error exchanging Google code:", err);
+      } finally {
+        setLoading(false);
       }
-    })();
+    }
 
-    // 🧹 Clean up URL so query params disappear after login
-    window.history.replaceState({}, document.title, "/");
-  }
-}, []);
+    if (code) {
+      exchangeCodeForToken();
+      return;
+    }
+  }, []);
 
+  // ✅ Manual login via form (passed from LoginScreen)
   const handleLogin = (t) => {
     localStorage.setItem("uplift_token", t);
     setToken(t);
     setScreen("dashboard");
   };
 
+  // ✅ Logout
   const handleLogout = () => {
     localStorage.removeItem("uplift_token");
+    localStorage.removeItem("uplift_company");
+    localStorage.removeItem("uplift_user");
     setToken(null);
     setScreen("login");
   };
@@ -97,7 +144,7 @@ useEffect(() => {
   if (screen === "leads")
     return <Leads onBack={() => setScreen("dashboard")} token={token} />;
 
-  // 🔹 Activity Center (AI Copilot already globally available)
+  // 🔹 Activity Center (AI Copilot globally available)
   if (screen === "activity-center")
     return <ActivityCenter onBack={() => setScreen("dashboard")} />;
 

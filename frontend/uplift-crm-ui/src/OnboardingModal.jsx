@@ -1,11 +1,8 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
-export default function OnboardingModal({ user, company, onSave }) {
-  const [open, setOpen] = useState(
-    company?.company_name?.endsWith("’s Company") ||
-      company?.company_name?.endsWith("'s Company")
-  );
+export default function OnboardingModal({ user, company, onSave, onClose }) {
+  const [open, setOpen] = useState(false);
   const [form, setForm] = useState({
     company_name: company?.company_name || "",
     industry: company?.industry || "",
@@ -13,12 +10,22 @@ export default function OnboardingModal({ user, company, onSave }) {
   });
   const [saving, setSaving] = useState(false);
 
+  // React to company prop changes
+  useEffect(() => {
+    if (!company?.company_name || company?.company_name?.trim() === "") {
+      setOpen(true);
+    } else {
+      setOpen(false);
+    }
+  }, [company]);
+
   async function handleSubmit(e) {
     e.preventDefault();
     setSaving(true);
     try {
       await onSave(form);
       setOpen(false);
+      onClose?.();          // also tell Dashboard to close modal
     } catch (err) {
       alert("Could not update company. Try again.");
     } finally {
@@ -49,6 +56,7 @@ export default function OnboardingModal({ user, company, onSave }) {
             </p>
 
             <form onSubmit={handleSubmit} className="space-y-4">
+              {/* Company Name */}
               <div>
                 <label className="block text-sm mb-1">Company Name</label>
                 <input
@@ -62,6 +70,7 @@ export default function OnboardingModal({ user, company, onSave }) {
                 />
               </div>
 
+              {/* Industry */}
               <div>
                 <label className="block text-sm mb-1">Industry</label>
                 <input
@@ -75,6 +84,7 @@ export default function OnboardingModal({ user, company, onSave }) {
                 />
               </div>
 
+              {/* Team Size */}
               <div>
                 <label className="block text-sm mb-1">Team Size</label>
                 <input

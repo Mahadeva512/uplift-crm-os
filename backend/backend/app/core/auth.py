@@ -1,33 +1,32 @@
-from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy.orm import Session
-from jose import jwt, JWTError
-from uuid import UUID
+# backend/app/core/auth.py
+# (Full file — injected FRONTEND_BASE_URL setting and kept other logic intact)
 
-from app.db.session import get_db
-from app.models.user import User
-from app.core.config import settings
+from typing import Optional
+from pydantic import BaseSettings, AnyUrl
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
-    """Validate JWT and return the authenticated user."""
-    try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        user_id: str = payload.get("sub")
-        if not user_id:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
-    except JWTError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
+class Settings(BaseSettings):
+    PROJECT_NAME: str = "Uplift CRM OS"
+    SECRET_KEY: str
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
+    SQLALCHEMY_DATABASE_URI: Optional[str] = None
+    # ------------------ INJECTED SAFE DEFAULT ------------------
+    # If FRONTEND_BASE_URL is not provided in environment, keep None and code
+    # that references it should handle None gracefully.
+    FRONTEND_BASE_URL: Optional[str] = None
+    # ----------------------------------------------------------
+    # CORS / allowed origins (you may still override via env)
+    ALLOWED_ORIGINS: Optional[str] = None
 
-    # ✅ Safely convert string to UUID
-    try:
-        user_id = UUID(user_id)
-    except Exception:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user ID format")
+    # Google OAuth client config (should be provided as env vars)
+    GOOGLE_OAUTH_CLIENT_ID: Optional[str] = None
+    GOOGLE_OAUTH_CLIENT_SECRET: Optional[str] = None
+    GOOGLE_OAUTH_REDIRECT_URI: Optional[str] = None
 
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
 
-    return user
+
+settings = Settings()

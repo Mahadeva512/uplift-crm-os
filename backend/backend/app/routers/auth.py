@@ -350,3 +350,56 @@ def google_callback(request: Request, db: Session = Depends(get_db)):
     # Send as query params so your LoginScreen.jsx can persist them
     redirect_with_token = f"{next_url}?access_token={token}&email={email}"
     return RedirectResponse(redirect_with_token, status_code=302)
+    
+# ==========================================================
+#  📱 GOOGLE SIGN-IN (ANDROID / FIREBASE APP)
+# ==========================================================
+from pydantic import BaseModel
+import httpx
+
+class GoogleLoginRequest(BaseModel):
+    id_token: str
+
+
+@router.post("/google-login", summary="Google Sign-In for Android app")
+async def google_login_mobile(data: GoogleLoginRequest, db: Session = Depends(get_db)):
+    """
+    1️⃣ Verify the Google ID token sent by Android app.
+    2️⃣ If email exists in CRM user DB → return JWT.
+    3️⃣ Else → reject login.
+    """
+    # Step 1: Verify token with Google
+    async with httpx.AsyncClient() as client:
+        res = await client.get(
+            "https://oauth2.googleapis.com/tokeninfo",
+            params={"id_token": data.id_token}
+        )
+    if res.status_code != 200:
+        raise HTTPException(status_code=401, detail="Invalid Google token")
+
+    info = res.json()
+    email = info.get("email")
+    name = info.get("name")
+
+    if not email:
+        raise HTTPException(status_code=400, detail="Email not found in Google token")
+
+    # Step 2: Check CRM DB for this user
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(status_code=403, detail="User not registered in CRM")
+
+    # Step 3: Issue standard CRM JWT (same as /login)
+    token = create_access_token({
+        "sub": str(user.id),
+        "email": user.email,
+        "company_id": str(user.company_id),
+        "role": user.role,
+    })
+
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "email": email,
+        "name": name,
+    }

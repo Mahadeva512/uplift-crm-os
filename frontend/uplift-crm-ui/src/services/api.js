@@ -1,6 +1,6 @@
-const API_BASE_URL =
-  import.meta.env.VITE_API_URL || "https://uplift-crm-backend.onrender.com";
+// src/services/api.js
+// Keeps older imports working, but points to the real client
+import client, { API_BASE_URL } from "../api/client";
 
-console.log("[API] Using base URL:", API_BASE_URL);
-
-export default API_BASE_URL;
+export { client as apiClient, API_BASE_URL };
+export default client;

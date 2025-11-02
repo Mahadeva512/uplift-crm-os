@@ -28,8 +28,11 @@ class ActivityBase(BaseModel):
     geo_lat: Optional[float] = None
     geo_long: Optional[float] = None
 
-    class Config:
-        orm_mode = True
+    from pydantic import BaseModel, ConfigDict
+
+class MyModel(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
 
 
 # ---------------------------------------------------------------------------

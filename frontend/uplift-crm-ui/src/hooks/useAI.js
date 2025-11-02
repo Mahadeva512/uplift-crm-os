@@ -51,42 +51,55 @@ const getToken = () =>
       localStorage.getItem("token"))) ||
   "";
 
-// ✅ 3. Core AI fetch wrapper
-async function aiFetch(path, { method = "GET", body, headers = {}, timeout = 20000 } = {}) {
+// ✅ 3. Core AI fetch wrapper (Render-safe + URL clean + timeout + token)
+async function aiFetch(
+  path,
+  { method = "GET", body, headers = {}, timeout = 20000 } = {}
+) {
+  const API_BASE =
+    (import.meta.env.VITE_API_BASE_URL &&
+      import.meta.env.VITE_API_BASE_URL.trim().replace(/\/+$/, "")) ||
+    "https://uplift-crm-backend.onrender.com";
+
+  // ensure path starts with '/'
+  const cleanPath = path.startsWith("/") ? path : `/${path}`;
+
   const h = new Headers(headers);
   if (body && !(body instanceof FormData) && !h.has("Content-Type")) {
     h.set("Content-Type", "application/json");
   }
 
-  const token = getToken();
-  if (token && !h.has("Authorization")) h.set("Authorization", `Bearer ${token}`);
+  const token = getToken?.();
+  if (token && !h.has("Authorization")) {
+    h.set("Authorization", `Bearer ${token}`);
+  }
 
   const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(), timeout);
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
 
   try {
-    const res = await fetch(`${API_BASE}${path}`, {
+    const res = await fetch(`${API_BASE}${cleanPath}`, {
       method,
-      body: body && !(body instanceof FormData) ? JSON.stringify(body) : body,
+      body:
+        body && !(body instanceof FormData) ? JSON.stringify(body) : body,
       headers: h,
       signal: controller.signal,
       credentials: "include",
     });
 
-    clearTimeout(t);
+    clearTimeout(timeoutId);
 
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      console.error("❌ AI Request Failed", path, res.status, text);
+      console.error("❌ AI Request Failed", cleanPath, res.status, text);
       throw new Error(`${res.status} ${res.statusText} — ${text}`);
     }
 
-    const ct = res.headers.get("content-type") || "";
-    return ct.includes("application/json") ? res.json() : res.text();
-  } catch (e) {
-    clearTimeout(t);
-    console.error("aiFetch error", path, e);
-    throw e;
+    return await res.json().catch(() => ({}));
+  } catch (err) {
+    clearTimeout(timeoutId);
+    console.error("⚠️ AI fetch error:", err.message || err);
+    throw err;
   }
 }
 

@@ -1,5 +1,23 @@
 // src/api/client.js
-// Keeps existing imports across the app working.
-// It simply re-exports the single axios instance.
-import api from "@/services/api";
-export default api;
+import axios from "axios";
+
+export const API_BASE_URL =
+  import.meta.env.VITE_API_BASE || "https://uplift-crm-backend.onrender.com";
+
+console.log("✅ Using API base:", API_BASE_URL);
+
+const client = axios.create({
+  baseURL: API_BASE_URL,
+  headers: {
+    "Content-Type": "application/json",
+  },
+});
+
+// ✅ Automatically attach bearer token
+client.interceptors.request.use((config) => {
+  const token = localStorage.getItem("uplift_token");
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
+
+export default client;

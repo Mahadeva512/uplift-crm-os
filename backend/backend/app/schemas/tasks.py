@@ -37,8 +37,11 @@ class TaskBase(BaseModel):
     auto_generated: Optional[bool] = False
     parent_activity_id: Optional[UUID] = None
 
-    class Config:
-        orm_mode = True
+    from pydantic import BaseModel, ConfigDict
+
+class MyModel(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
 
 
 # ==========================================================
