@@ -30,10 +30,13 @@ class CompanyProfileResponse(CompanyProfileBase):
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
 
-    from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 class MyModel(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    # your fields...
+
+    class Config:
+        orm_mode = True
 
 
 # -------------------------------------------------------------------

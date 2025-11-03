@@ -46,10 +46,13 @@ class LeadBase(BaseModel):
             raise ValueError("Invalid email format")
         return v
 
-    from pydantic import BaseModel, ConfigDict
+    from pydantic import BaseModel
 
 class MyModel(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    # your fields...
+
+    class Config:
+        orm_mode = True
 
 
 
