@@ -1,38 +1,58 @@
+# ============================================================
+#  UPLIFT CRM BACKEND CONFIGURATION (FINAL – DOTENV VERSION)
+# ============================================================
+
+import os
 from dotenv import load_dotenv
+
+# Load environment variables from .env file (for local) or Render dashboard (production)
 load_dotenv()
-from pydantic_settings import BaseSettings
-from functools import lru_cache
 
 
-class Settings(BaseSettings):
-    # ==========================================================
-    # 🔐 Security Config
-    # ==========================================================
-    SECRET_KEY: str = "upliftcrm_super_secret_key_2025"
-    ALGORITHM: str = "HS256"
-
-    # ==========================================================
-    # 🗄️ Database Config
-    # ==========================================================
-    DATABASE_URL: str = (
-        "postgresql+psycopg://uplift:uplift123@localhost:5432/uplift"
-    )
-
-    # ==========================================================
-    # ⚙️ App Metadata
-    # ==========================================================
-    PROJECT_NAME: str = "Uplift CRM vPro"
+class Settings:
+    # --------------------------------------------------------
+    # Core Project Info
+    # --------------------------------------------------------
+    PROJECT_NAME: str = "Uplift CRM Backend"
     VERSION: str = "1.0.0"
-    DESCRIPTION: str = "API backend for Uplift CRM vPro"
+    DESCRIPTION: str = "Backend API for Uplift CRM OS"
 
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
+    # --------------------------------------------------------
+    # Security & JWT
+    # --------------------------------------------------------
+    JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "upliftsecretkey123")
+    JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
+
+    # --------------------------------------------------------
+    # Database Connection
+    # --------------------------------------------------------
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "")
+
+    # --------------------------------------------------------
+    # Frontend & CORS
+    # --------------------------------------------------------
+    FRONTEND_BASE_URL: str = os.getenv("FRONTEND_BASE_URL", "http://localhost:4173")
+    CORS_ORIGINS: list = os.getenv("CORS_ORIGINS", "*").split(",")
+
+    # --------------------------------------------------------
+    # Timezone / Localization
+    # --------------------------------------------------------
+    TIMEZONE: str = os.getenv("TZ", "Asia/Kolkata")
+
+    # --------------------------------------------------------
+    # Optional Integrations (Google, HF API, etc.)
+    # --------------------------------------------------------
+    GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "")
+    GOOGLE_CLIENT_SECRET: str = os.getenv("GOOGLE_CLIENT_SECRET", "")
+    HF_API_KEY: str = os.getenv("HF_API_KEY", "")
 
 
-@lru_cache()
-def get_settings():
-    return Settings()
+# Instantiate settings
+settings = Settings()
 
-
-settings = get_settings()
+# Optional helper for quick debugging
+if __name__ == "__main__":
+    print("Loaded settings ✅")
+    print("DB URL:", settings.DATABASE_URL or "Not set")
+    print("Frontend URL:", settings.FRONTEND_BASE_URL)
+    print("CORS Origins:", settings.CORS_ORIGINS)
