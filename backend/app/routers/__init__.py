@@ -4,7 +4,7 @@
 
 from fastapi import APIRouter
 
-# Import each router directly
+# Import routers individually (no top-level import of app.routers)
 from app.routers import (
     auth,
     users,
@@ -15,10 +15,9 @@ from app.routers import (
     orders,
 )
 
-# Create the master API router
 api_router = APIRouter()
 
-# Register individual routers (prefix + tag)
+# Register routers with tags
 api_router.include_router(auth.router, prefix="/auth", tags=["Auth"])
 api_router.include_router(users.router, prefix="/users", tags=["Users"])
 api_router.include_router(leads.router, prefix="/leads", tags=["Leads"])
