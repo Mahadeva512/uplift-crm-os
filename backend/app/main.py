@@ -1,19 +1,36 @@
-from __future__ import annotations
-import importlib
 import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
+from contextlib import asynccontextmanager
+from app.db.session import engine
+from app.db import base  # noqa
+from app.utils.logger import log_setup
 
-# ---------------------------------------------------------
-#   App Initialization
-# ---------------------------------------------------------
-app = FastAPI(title=settings.PROJECT_NAME, version=settings.VERSION)
-log = logging.getLogger("uvicorn")
+# ✅ Setup Logging
+logger = log_setup()
+logger.info("🚀 Starting Uplift CRM Backend...")
 
-# ---------------------------------------------------------
-#   CORS Configuration (Frontend + Render)
-# ---------------------------------------------------------
+# ✅ Lifespan Event
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("🔌 Application startup...")
+    try:
+        # Any startup logic can go here
+        yield
+    finally:
+        logger.info("🛑 Application shutdown...")
+
+# ✅ Initialize App
+app = FastAPI(
+    title="Uplift CRM OS",
+    description="Unified CRM OS Backend - Production Deployment",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+# ✅ CORS Configuration (Render + Local)
+logger.info(f"🌐 CORS origins: {settings.CORS_ORIGINS}")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -21,51 +38,58 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-log.warning(f"✅ CORS enabled for: {', '.join(settings.CORS_ORIGINS)}")
 
-# ---------------------------------------------------------
-#   Dynamic Router Mounting
-# ---------------------------------------------------------
-def mount_router(path: str, prefix: str = "", tag: str = ""):
-    try:
-        module = importlib.import_module(path)
-        router = getattr(module, "router", None)
-        if router:
-            app.include_router(router, prefix=prefix, tags=[tag] if tag else None)
-            log.warning(f"✅ Router registered: {path}")
-        else:
-            log.warning(f"⚠️  No router found in {path}")
-    except Exception as e:
-        log.warning(f"⚠️  Could not include {path}: {e}")
+# ✅ Include Routers Dynamically
+from app.routers import (
+    auth,
+    users,
+    leads,
+    activities,
+    tasks,
+    company_profile,
+    ai,
+    quotations,
+    orders,
+    products,
+)
 
-# Core routers
-mount_router("app.routers.auth", prefix="/auth", tag="auth")
-mount_router("app.routers.users", prefix="/users", tag="users")
-mount_router("app.routers.company_profile", prefix="/company", tag="company")
-mount_router("app.routers.dashboard", prefix="/dashboard", tag="dashboard")
-mount_router("app.routers.leads", prefix="/leads", tag="leads")
-mount_router("app.routers.activities", prefix="/activities", tag="activities")
-mount_router("app.routers.tasks", prefix="/tasks", tag="tasks")
-mount_router("app.routers.quotation", prefix="/quotation", tag="quotation")
-mount_router("app.routers.order", prefix="/order", tag="order")
-mount_router("app.routers.activity_overview", prefix="/activity_overview", tag="activity")
-mount_router("app.routers.gmail", prefix="/gmail", tag="gmail")
-mount_router("app.routers.ai_router", prefix="/ai", tag="ai")
-mount_router("app.routers.ai_insights", prefix="/ai", tag="ai_insights")
+router_list = [
+    (auth.router, "/auth"),
+    (users.router, "/users"),
+    (leads.router, "/leads"),
+    (activities.router, "/activities"),
+    (tasks.router, "/tasks"),
+    (company_profile.router, "/company"),
+    (ai.router, "/ai"),
+    (quotations.router, "/quotations"),
+    (orders.router, "/orders"),
+    (products.router, "/products"),
+]
 
-# ---------------------------------------------------------
-#   Injected Fix — Google OAuth router mount
-# ---------------------------------------------------------
+for r, prefix in router_list:
+    app.include_router(r, prefix=prefix)
+    logger.info(f"✅ Router mounted: {prefix}")
+
+# ✅ Root Route
+@app.get("/")
+async def root():
+    return {
+        "status": "ok",
+        "app": "Uplift CRM OS",
+        "version": "1.0.0",
+        "base_url": settings.BACKEND_BASE_URL,
+    }
+
+
+# ✅ Health Check Route (for Render)
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy", "service": "Uplift CRM OS"}
+
+
+# ✅ Create Tables (optional safety in production)
 try:
-    from app.routers.integrations import google_auth
-    app.include_router(google_auth.router, prefix="/auth", tags=["Google Auth"])
-    log.warning("✅ Google OAuth router mounted under /auth (for /auth/google, /auth/google/callback)")
+    base.Base.metadata.create_all(bind=engine)
+    logger.info("📦 Database tables ensured.")
 except Exception as e:
-    log.warning(f"⚠️  Could not include Google OAuth router: {e}")
-
-# ---------------------------------------------------------
-#   Health Check
-# ---------------------------------------------------------
-@app.get("/", tags=["health"])
-def health():
-    return {"status": "ok", "service": settings.PROJECT_NAME}
+    logger.warning(f"⚠️ Table creation skipped: {e}")
