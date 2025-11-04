@@ -45,7 +45,7 @@ export default function Dashboard({ onLogout, onSwitch }) {
     const env = import.meta.env?.VITE_API_BASE_URL?.trim();
     if (env) return env.replace(/\/+$/, "");
     const host = window.location.hostname || "localhost";
-    return "https://uplift-crm-backend.onrender.com";
+    return "https://uplift-crm-os.onrender.com";
   }, []);
 
   // 🧠 Load session + company
@@ -57,7 +57,7 @@ useEffect(() => {
       const u = JSON.parse(localStorage.getItem("uplift_user") || "{}");
       setUser(u);
 
-      const res = await fetch(`${API_BASE}/company/profile`, {
+      const res = await fetch(`${API_BASE}/company/company/profile`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
@@ -90,7 +90,7 @@ useEffect(() => {
   async function updateCompany(data) {
     try {
       const token = localStorage.getItem("uplift_token");
-      const res = await fetch(`${API_BASE}/company/update`, {
+      const res = await fetch(`${API_BASE}/company/company/update`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

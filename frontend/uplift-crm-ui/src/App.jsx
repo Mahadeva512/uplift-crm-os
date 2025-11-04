@@ -42,7 +42,7 @@ export default function App() {
         setScreen("dashboard");
 
         // ✅ Verify session & sync profile
-        const res = await fetch(`${API_BASE}/auth/me`, {
+        const res = await fetch(`${API_BASE}/users/users/me`, {
           headers: { Authorization: `Bearer ${jwt}` },
           credentials: "include",
         });
@@ -52,7 +52,7 @@ export default function App() {
         }
 
         // ✅ Fetch company profile
-        const resCompany = await fetch(`${API_BASE}/company/profile`, {
+        const resCompany = await fetch(`${API_BASE}/company/company/profile`, {
           headers: { Authorization: `Bearer ${jwt}` },
         });
         if (resCompany.ok) {

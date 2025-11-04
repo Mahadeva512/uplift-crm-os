@@ -56,7 +56,7 @@ export default function LoginScreen({ onLogin, onSwitch }) {
   const fetchAndPersistProfile = async (jwt) => {
     try {
       // Try the common ones in order:
-      const endpoints = ["/auth/me", "/users/me", "/me"];
+      const endpoints = ["/users/users/me", "/users/me", "/auth/me", "/me"];
       let me = null;
 
       for (const ep of endpoints) {

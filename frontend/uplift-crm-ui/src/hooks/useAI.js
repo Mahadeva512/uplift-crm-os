@@ -111,18 +111,18 @@ export function useAI() {
     if (params.days) qs.set("days", String(params.days));
     if (params.user_id) qs.set("user_id", params.user_id);
     if (params.lead_id) qs.set("lead_id", params.lead_id);
-    return aiFetch(`/ai/insights?${qs.toString()}`);
+    return aiFetch(`/ai/ai/insights?${qs.toString()}`);
   };
 
   // Weekly AI report
-  const getWeeklyReport = () => aiFetch(`/ai/weekly-report`);
+  const getWeeklyReport = () => aiFetch(`/ai/ai/insights?days=7`);
 
   // Activity-based AI
   const summarizeActivity = (activityId) =>
-    aiFetch(`/ai/summarize/${activityId}`, { method: "POST" });
+    aiFetch(`/ai/ai/summarize/${activityId}`, { method: "POST" });
 
   const suggestNextStep = (activityId) =>
-    aiFetch(`/ai/next-step/${activityId}`, { method: "POST" });
+    aiFetch(`/ai/ai/next-step/${activityId}`, { method: "POST" });
 
   // Optional: health check ping
   const ping = () => aiFetch(`/`);
