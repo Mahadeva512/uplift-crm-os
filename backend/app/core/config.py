@@ -44,10 +44,10 @@ class Settings:
     # --------------------------------------------------------
     DATABASE_URL: str = env("DATABASE_URL", "")
 
-    # --------------------------------------------------------
+        # --------------------------------------------------------
     # Frontend & CORS
     # --------------------------------------------------------
-    FRONTEND_BASE_URL: str = env("FRONTEND_BASE_URL", "http://localhost:5173")
+    FRONTEND_BASE_URL: str = env("FRONTEND_BASE_URL", "http://localhost:4173")
     CORS_ORIGINS: list = [
         "http://localhost",
         "http://localhost:5173",
@@ -56,6 +56,9 @@ class Settings:
         "http://127.0.0.1:4173",
         "http://192.168.29.70:5173",
         "http://192.168.29.70:4173",
+        # --- ✅ Add these two Render URLs ---
+        "https://uplift-crm-ui.onrender.com",
+        "https://uplift-crm-os.onrender.com",
     ]
 
     _extra_front = env("FRONTEND_BASE_URL", "")
