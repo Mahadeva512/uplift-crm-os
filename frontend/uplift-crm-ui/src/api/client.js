@@ -2,7 +2,7 @@
 import axios from "axios";
 
 export const API_BASE_URL =
-  import.meta.env.VITE_API_BASE || "https://uplift-crm-backend.onrender.com";
+  import.meta.env.VITE_API_BASE_URL || "https://uplift-crm-os.onrender.com";
 
 console.log("✅ Using API base:", API_BASE_URL);
 

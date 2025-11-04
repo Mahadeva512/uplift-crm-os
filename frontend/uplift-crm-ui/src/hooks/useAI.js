@@ -5,15 +5,15 @@
 
 function resolveApiBase() {
   try {
-    if (typeof import.meta !== "undefined" && import.meta?.env?.VITE_API_BASE) {
-      return import.meta.env.VITE_API_BASE;
+    if (typeof import.meta !== "undefined" && import.meta?.env?.VITE_API_BASE_URL) {
+      return import.meta.env.VITE_API_BASE_URL;
     }
   } catch (_) {}
 
   try {
     if (typeof process !== "undefined" && process?.env) {
       return (
-        process.env.VITE_API_BASE ||
+        process.env.VITE_API_BASE_URL ||
         process.env.REACT_APP_API_BASE ||
         process.env.NEXT_PUBLIC_API_BASE ||
         process.env.API_BASE
@@ -57,8 +57,8 @@ async function aiFetch(
   { method = "GET", body, headers = {}, timeout = 20000 } = {}
 ) {
   const API_BASE =
-    (import.meta.env.VITE_API_BASE_URL &&
-      import.meta.env.VITE_API_BASE_URL.trim().replace(/\/+$/, "")) ||
+    (import.meta.env.VITE_API_BASE_URL_URL &&
+      import.meta.env.VITE_API_BASE_URL_URL.trim().replace(/\/+$/, "")) ||
     "https://uplift-crm-os.onrender.com";
 
   // ensure path starts with '/'
