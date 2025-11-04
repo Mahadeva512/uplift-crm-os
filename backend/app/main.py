@@ -6,12 +6,6 @@ from typing import List
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-# Optional settings import (non-blocking)
-try:
-    from app.core.config import settings  # type: ignore
-except Exception:
-    settings = None
-
 # ---------------------------------------------------------
 #   App Initialization
 # ---------------------------------------------------------
@@ -20,7 +14,7 @@ log = logging.getLogger("uvicorn")
 logging.basicConfig(level=logging.INFO)
 
 # ---------------------------------------------------------
-#   CORS Configuration
+#   CORS Configuration (Frontend / Local + Deployed)
 # ---------------------------------------------------------
 _allowed_origins: List[str] = [
     "http://localhost",
@@ -40,11 +34,7 @@ env_frontend_alt = os.getenv("VITE_FRONTEND_BASE_URL", "").strip()
 if env_frontend_alt and env_frontend_alt not in _allowed_origins:
     _allowed_origins.append(env_frontend_alt)
 
-if settings is not None:
-    fb = getattr(settings, "FRONTEND_BASE_URL", None)
-    if fb and fb not in _allowed_origins:
-        _allowed_origins.append(fb)
-
+# Remove duplicates
 seen, origins = set(), []
 for o in _allowed_origins:
     if o and o not in seen:
@@ -61,11 +51,24 @@ app.add_middleware(
 log.warning("✅ CORS enabled for: %s", ", ".join(origins))
 
 # ---------------------------------------------------------
-#   Router Registration (safe, circular-free)
+#   Router Registration (Circular-Safe)
 # ---------------------------------------------------------
-from app.routers import api_router  # <- uses your new circular-safe __init__.py
-app.include_router(api_router)
-log.warning("✅ All routers registered through api_router")
+try:
+    from app.routers import api_router
+    app.include_router(api_router)
+    log.warning("✅ All routers registered through api_router")
+except Exception as e:
+    log.warning(f"⚠️  Failed to load api_router: {e}")
+
+# ---------------------------------------------------------
+#   Google Auth Router (Mounted Manually)
+# ---------------------------------------------------------
+try:
+    from app.routers.integrations import google_auth
+    app.include_router(google_auth.router, prefix="/auth", tags=["Google Auth"])
+    log.warning("✅ Google Auth router registered at /auth")
+except Exception as e:
+    log.warning(f"⚠️  Google Auth router missing or failed: {e}")
 
 # ---------------------------------------------------------
 #   Health Check

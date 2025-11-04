@@ -1,12 +1,28 @@
 # ============================================================
-#  UPLIFT CRM BACKEND CONFIGURATION (FINAL – DOTENV VERSION)
+#  UPLIFT CRM BACKEND CONFIGURATION (FINAL – RENDER READY)
 # ============================================================
 
 import os
 from dotenv import load_dotenv
+from pathlib import Path
 
-# Load environment variables from .env file (for local) or Render dashboard (production)
-load_dotenv()
+# ------------------------------------------------------------
+# Load .env automatically (both local + Render)
+# ------------------------------------------------------------
+BASE_DIR = Path(__file__).resolve().parent.parent
+dotenv_path = BASE_DIR / ".env"
+if dotenv_path.exists():
+    load_dotenv(dotenv_path)
+else:
+    load_dotenv()  # fallback (Render env variables)
+
+# ------------------------------------------------------------
+# Environment Loader
+# ------------------------------------------------------------
+def env(key: str, default: str = "") -> str:
+    """Read environment variable with safe fallback."""
+    value = os.getenv(key, default)
+    return value.strip() if isinstance(value, str) else value
 
 
 class Settings:
@@ -20,39 +36,66 @@ class Settings:
     # --------------------------------------------------------
     # Security & JWT
     # --------------------------------------------------------
-    JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "upliftsecretkey123")
-    JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
+    JWT_SECRET_KEY: str = env("JWT_SECRET_KEY", "upliftsecretkey123")
+    JWT_ALGORITHM: str = env("JWT_ALGORITHM", "HS256")
 
     # --------------------------------------------------------
-    # Database Connection
+    # Database
     # --------------------------------------------------------
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "")
+    DATABASE_URL: str = env("DATABASE_URL", "")
 
     # --------------------------------------------------------
     # Frontend & CORS
     # --------------------------------------------------------
-    FRONTEND_BASE_URL: str = os.getenv("FRONTEND_BASE_URL", "http://localhost:4173")
-    CORS_ORIGINS: list = os.getenv("CORS_ORIGINS", "*").split(",")
+    FRONTEND_BASE_URL: str = env("FRONTEND_BASE_URL", "http://localhost:5173")
+    CORS_ORIGINS: list = [
+        "http://localhost",
+        "http://localhost:5173",
+        "http://localhost:4173",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:4173",
+        "http://192.168.29.70:5173",
+        "http://192.168.29.70:4173",
+    ]
+
+    _extra_front = env("FRONTEND_BASE_URL", "")
+    if _extra_front and _extra_front not in CORS_ORIGINS:
+        CORS_ORIGINS.append(_extra_front)
 
     # --------------------------------------------------------
     # Timezone / Localization
     # --------------------------------------------------------
-    TIMEZONE: str = os.getenv("TZ", "Asia/Kolkata")
+    TIMEZONE: str = env("TZ", "Asia/Kolkata")
 
     # --------------------------------------------------------
-    # Optional Integrations (Google, HF API, etc.)
+    # Google OAuth / Integrations
     # --------------------------------------------------------
-    GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "")
-    GOOGLE_CLIENT_SECRET: str = os.getenv("GOOGLE_CLIENT_SECRET", "")
-    HF_API_KEY: str = os.getenv("HF_API_KEY", "")
+    BACKEND_BASE_URL: str = env("BACKEND_BASE_URL", "https://uplift-crm-os.onrender.com")
+    GOOGLE_CLIENT_ID: str = env("GOOGLE_CLIENT_ID", "")
+    GOOGLE_CLIENT_SECRET: str = env("GOOGLE_CLIENT_SECRET", "")
+    GOOGLE_REDIRECT_URI: str = env(
+        "GOOGLE_REDIRECT_URI",
+        f"{BACKEND_BASE_URL}/auth/google/callback",
+    )
+
+    # --------------------------------------------------------
+    # AI / External APIs
+    # --------------------------------------------------------
+    HF_API_KEY: str = env("HF_API_KEY", "")
+    OPENROUTER_API_KEY: str = env("OPENROUTER_API_KEY", "")
 
 
-# Instantiate settings
+# Instantiate Settings
 settings = Settings()
 
-# Optional helper for quick debugging
+# ------------------------------------------------------------
+# Debug mode check (local run)
+# ------------------------------------------------------------
 if __name__ == "__main__":
-    print("Loaded settings ✅")
-    print("DB URL:", settings.DATABASE_URL or "Not set")
+    print("✅ Loaded Settings")
+    print("Project:", settings.PROJECT_NAME)
     print("Frontend URL:", settings.FRONTEND_BASE_URL)
     print("CORS Origins:", settings.CORS_ORIGINS)
+    print("Backend URL:", settings.BACKEND_BASE_URL)
+    print("Google Client ID:", "✔️" if settings.GOOGLE_CLIENT_ID else "❌ Not Set")
+    print("Database URL:", "✔️" if settings.DATABASE_URL else "❌ Not Set")

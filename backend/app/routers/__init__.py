@@ -39,3 +39,10 @@ api_router.include_router(ai_router.router, prefix="/ai-router", tags=["AI Route
 api_router.include_router(ai_insights.router, prefix="/ai-insights", tags=["AI Insights"])
 api_router.include_router(ai_gmail.router, prefix="/ai-gmail", tags=["AI Gmail"])
 api_router.include_router(activity_overview.router, prefix="/activity-overview", tags=["Activity Overview"])
+# --- Optional Integrations ---
+try:
+    from app.routers.integrations import google_auth
+    api_router.include_router(google_auth.router, prefix="/auth", tags=["Google Auth"])
+except Exception as e:
+    import logging
+    logging.warning(f"⚠️  Could not include Google Auth router: {e}")
