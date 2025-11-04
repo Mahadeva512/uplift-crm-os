@@ -1,16 +1,28 @@
 // src/api/apiClient.js
 import axios from "axios";
 
+// ✅ Set the correct backend base URL
 const API_BASE_URL =
-  (import.meta.env.VITE_API_BASE_URL && import.meta.env.VITE_API_BASE_URL.trim().replace(/\/+$/, "")) ||
-  "https://uplift-crm-backend.onrender.com";
+  import.meta.env.VITE_API_BASE_URL || "https://uplift-crm-os.onrender.com";
 
+// ✅ Create axios instance
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 20000,
-  headers: { "Content-Type": "application/json" },
+  headers: {
+    "Content-Type": "application/json",
+  },
 });
 
+// ✅ Attach token if available
+apiClient.interceptors.request.use((config) => {
+  const token = localStorage.getItem("uplift_token");
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// ✅ Optional user email handling (used by Gmail sync, AI, etc.)
 let getAuthEmail = null;
 try {
   if (typeof window !== "undefined" && window.__upliftGetUserEmail__) {
@@ -28,6 +40,7 @@ apiClient.interceptors.request.use((config) => {
         localStorage.getItem("user_email") ||
         null;
     }
+
     let token = null;
     if (typeof localStorage !== "undefined") {
       if (userEmail) {
@@ -40,12 +53,14 @@ apiClient.interceptors.request.use((config) => {
           null;
       }
     }
+
     if (token) {
       config.headers = config.headers || {};
       if (!config.headers.Authorization) {
         config.headers.Authorization = `Bearer ${token}`;
       }
     }
+
     if (userEmail) {
       config.headers = config.headers || {};
       if (!config.headers["X-User-Email"]) {

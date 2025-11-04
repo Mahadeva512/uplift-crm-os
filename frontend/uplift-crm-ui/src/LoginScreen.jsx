@@ -3,6 +3,10 @@ import { motion } from "framer-motion";
 import { useEffect, useMemo, useState } from "react";
 import { FiMail, FiLock } from "react-icons/fi";
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
+const GOOGLE_AUTH_URL = import.meta.env.VITE_GOOGLE_AUTH_URL;
+
+
 /**
  * ---------------------------------------------------------------------------
  * LoginScreen.jsx (robust, production-ready)
@@ -145,9 +149,7 @@ export default function LoginScreen({ onLogin, onSwitch }) {
     }
   }
 
-  // --------- Google Sign-In ----------
-
-  function handleGoogleLogin() {
+function handleGoogleLogin() {
     /**
      * Your backend’s /auth/google will do:
      *  - redirect to Google
@@ -159,7 +161,7 @@ export default function LoginScreen({ onLogin, onSwitch }) {
      */
     const nextUrl =
       window.location.origin + (window.location.pathname || "/dashboard");
-    const url = `${API_BASE_URL}/auth/google?next=${encodeURIComponent(nextUrl)}`;
+    const url = `${import.meta.env.VITE_GOOGLE_AUTH_URL}?next=${encodeURIComponent(window.location.origin)}`;
     window.location.href = url;
   }
 

@@ -1,4 +1,4 @@
-// App.jsx — Uplift CRM OS Core Navigation (Enhanced)
+// App.jsx — Uplift CRM OS Core Navigation (Finalized)
 import { useState, useEffect } from "react";
 import LoginScreen from "./LoginScreen";
 import SignUpScreen from "./SignUpScreen";
@@ -6,17 +6,18 @@ import Dashboard from "./Dashboard";
 import Leads from "./Leads";
 import ActivityCenter from "./pages/ActivityCenter"; // ✅ AI-powered Activity Center
 
+// ✅ Backend URL aligned with Render
 const API_BASE =
   (import.meta.env?.VITE_API_BASE_URL?.trim() ||
     import.meta.env?.VITE_API_URL?.trim() ||
-    "https://uplift-crm-backend.onrender.com").replace(/\/+$/, "");
+    "https://uplift-crm-os.onrender.com").replace(/\/+$/, "");
 
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem("uplift_token"));
   const [screen, setScreen] = useState("login");
   const [loading, setLoading] = useState(false);
 
-  // ✅ Auto-login check (from localStorage)
+  // ✅ Auto-login check
   useEffect(() => {
     const savedToken = localStorage.getItem("uplift_token");
     if (savedToken) {
@@ -25,7 +26,7 @@ export default function App() {
     }
   }, []);
 
-  // ✅ Handle Google / OAuth redirects
+  // ✅ Handle Google / OAuth redirect flow
   useEffect(() => {
     const qp = new URLSearchParams(window.location.search);
     const googleToken = qp.get("google_token");
@@ -40,7 +41,7 @@ export default function App() {
         setToken(jwt);
         setScreen("dashboard");
 
-        // ✅ Verify session and sync profile
+        // ✅ Verify session & sync profile
         const res = await fetch(`${API_BASE}/auth/me`, {
           headers: { Authorization: `Bearer ${jwt}` },
           credentials: "include",
@@ -60,20 +61,20 @@ export default function App() {
           console.log("🏢 Company data synced:", company.company_name);
         }
 
-        // ✅ Clean URL
+        // ✅ Clean up the URL after redirect
         window.history.replaceState({}, document.title, "/");
       } catch (err) {
         console.error("❌ Auth finalize error:", err);
       }
     }
 
-    // ✅ Handle direct token param
+    // ✅ If Google already returned a JWT directly
     if (googleToken || tokenParam) {
       finalizeAuth(googleToken || tokenParam);
       return;
     }
 
-    // ✅ Handle Google OAuth Code Flow
+    // ✅ Handle Google OAuth Code Exchange
     async function exchangeCodeForToken() {
       try {
         setLoading(true);
@@ -97,7 +98,7 @@ export default function App() {
         if (jwt) {
           await finalizeAuth(jwt);
         } else {
-          console.error("⚠️ No token in Google callback response:", data);
+          console.error("⚠️ No token returned from Google callback:", data);
         }
       } catch (err) {
         console.error("❌ Error exchanging Google code:", err);
@@ -106,20 +107,21 @@ export default function App() {
       }
     }
 
+    // ✅ Trigger exchange if code is in query params
     if (code) {
       exchangeCodeForToken();
       return;
     }
   }, []);
 
-  // ✅ Manual login via form (passed from LoginScreen)
+  // ✅ Manual login via email/password
   const handleLogin = (t) => {
     localStorage.setItem("uplift_token", t);
     setToken(t);
     setScreen("dashboard");
   };
 
-  // ✅ Logout
+  // ✅ Logout cleanup
   const handleLogout = () => {
     localStorage.removeItem("uplift_token");
     localStorage.removeItem("uplift_company");
@@ -128,7 +130,7 @@ export default function App() {
     setScreen("login");
   };
 
-  // 🔹 Login / Signup Flow
+  // 🔹 Login / Signup
   if (!token) {
     return screen === "login" ? (
       <LoginScreen onLogin={handleLogin} onSwitch={setScreen} />
@@ -137,17 +139,18 @@ export default function App() {
     );
   }
 
-  // 🔹 After Login
+  // 🔹 Dashboard
   if (screen === "dashboard")
     return <Dashboard onLogout={handleLogout} onSwitch={setScreen} />;
 
+  // 🔹 Leads
   if (screen === "leads")
     return <Leads onBack={() => setScreen("dashboard")} token={token} />;
 
-  // 🔹 Activity Center (AI Copilot globally available)
+  // 🔹 Activity Center
   if (screen === "activity-center")
     return <ActivityCenter onBack={() => setScreen("dashboard")} />;
 
-  // 🔹 Default fallback
+  // 🔹 Fallback
   return <Dashboard onLogout={handleLogout} onSwitch={setScreen} />;
 }

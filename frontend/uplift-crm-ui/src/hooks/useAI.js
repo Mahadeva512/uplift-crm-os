@@ -28,14 +28,14 @@ function resolveApiBase() {
     }
   } catch (_) {}
 
-  return "https://uplift-crm-backend.onrender.com"; // final fallback
+  return "https://uplift-crm-os.onrender.com"; // final fallback
 }
 
 // ✅ 1. Initialize and persist API base globally
 // 🔥 Guaranteed runtime fallback
 let API_BASE = resolveApiBase();
 if (!API_BASE || API_BASE === "null" || API_BASE === "undefined") {
-  API_BASE = "https://uplift-crm-backend.onrender.com";
+  API_BASE = "https://uplift-crm-os.onrender.com";
 }
 if (typeof window !== "undefined") {
   window.__API_BASE__ = API_BASE;
@@ -59,7 +59,7 @@ async function aiFetch(
   const API_BASE =
     (import.meta.env.VITE_API_BASE_URL &&
       import.meta.env.VITE_API_BASE_URL.trim().replace(/\/+$/, "")) ||
-    "https://uplift-crm-backend.onrender.com";
+    "https://uplift-crm-os.onrender.com";
 
   // ensure path starts with '/'
   const cleanPath = path.startsWith("/") ? path : `/${path}`;
