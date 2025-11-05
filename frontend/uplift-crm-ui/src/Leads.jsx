@@ -39,7 +39,7 @@ export default function Leads({ token: tokenProp }) {
   async function loadLeads() {
     try {
       setLoading(true);
-      const r = await client.get("/leads/");
+      const r = await client.get("/leads");
       const arr = Array.isArray(r.data) ? r.data : [];
       setLeads(arr);
       await analyzeWithAI(arr);
