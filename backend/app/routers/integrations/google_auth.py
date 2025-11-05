@@ -9,56 +9,25 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 
-# -------------------------------------------------------------------------
-# DB + models
-# -------------------------------------------------------------------------
-try:
-    from app.db.session import get_db
-    from sqlalchemy.orm import Session
-except Exception:
-    get_db = None
-    Session = None
+# ---------------------------------------------------------------------
+# DB imports
+# ---------------------------------------------------------------------
+from app.db.session import get_db
+from sqlalchemy.orm import Session
+from app.models.user import User
+from app.models.company_profile import CompanyProfile
+from app.routers.auth import create_access_token
 
-UserModel = None
-CompanyModel = None
-try:
-    from app.models.users import User as UserModel
-except Exception:
-    try:
-        from app.models.user import User as UserModel
-    except Exception:
-        pass
-try:
-    from app.models.company_profile import CompanyProfile as CompanyModel
-except Exception:
-    try:
-        from app.models.company import Company as CompanyModel
-    except Exception:
-        pass
-
-# -------------------------------------------------------------------------
-# JWT helper
-# -------------------------------------------------------------------------
-try:
-    from app.routers.auth import create_access_token
-except Exception:
-    import jwt
-    SECRET_KEY = os.getenv("UPLIFT_SECRET_KEY", "dev-secret")
-    ALGORITHM = "HS256"
-
-    def create_access_token(data: dict, expires_delta: Optional[int] = None) -> str:
-        minutes = 120 if expires_delta is None else int(expires_delta)
-        payload = {**data, "exp": datetime.utcnow() + timedelta(minutes=minutes)}
-        return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
-
-# -------------------------------------------------------------------------
-# Setup & constants
-# -------------------------------------------------------------------------
+# ---------------------------------------------------------------------
+# Logger setup
+# ---------------------------------------------------------------------
 logger = logging.getLogger("google_auth")
-router = APIRouter(tags=["auth"])   # ✅ single 'auth' tag, no /auth prefix inside
-
+router = APIRouter(tags=["auth"])
 os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
 
+# ---------------------------------------------------------------------
+# Credentials + constants
+# ---------------------------------------------------------------------
 ROOT = Path(__file__).resolve().parents[2]
 CREDENTIALS_DIR = ROOT / "routers" / "credentials"
 CREDENTIALS_DIR.mkdir(parents=True, exist_ok=True)
@@ -67,7 +36,6 @@ def _token_path(email: str) -> Path:
     safe = (email or "").replace("/", "_")
     return CREDENTIALS_DIR / f"token_{safe}.json"
 
-# ✅ Allow override from Render env
 BACKEND_BASE = os.getenv("BACKEND_BASE_URL", "https://uplift-crm-os.onrender.com").rstrip("/")
 FRONTEND_BASE = os.getenv("FRONTEND_BASE_URL", "https://uplift-crm-ui.onrender.com").rstrip("/")
 REDIRECT_URI = f"{BACKEND_BASE}/auth/google/callback"
@@ -82,9 +50,9 @@ SCOPES = [
     "openid",
 ]
 
-# -------------------------------------------------------------------------
-# Credentials helper
-# -------------------------------------------------------------------------
+# ---------------------------------------------------------------------
+# Import client config
+# ---------------------------------------------------------------------
 from app.core.auth_config import GOOGLE_CREDS
 
 def _require_client_secrets() -> dict:
@@ -97,6 +65,9 @@ def _require_client_secrets() -> dict:
         raise HTTPException(status_code=500, detail="Missing Google OAuth credentials")
     return GOOGLE_CREDS
 
+# ---------------------------------------------------------------------
+# Token helpers
+# ---------------------------------------------------------------------
 def _save_user_token(email: str, creds) -> None:
     p = _token_path(email)
     with open(p, "w", encoding="utf-8") as f:
@@ -115,12 +86,13 @@ def _delete_user_token(email: str) -> None:
     except Exception:
         pass
 
+# ---------------------------------------------------------------------
+# Company + user provisioning helpers
+# ---------------------------------------------------------------------
 def _create_placeholder_company(db: Session, full_name: str, email: str):
-    if not CompanyModel or not db:
-        return None
     try:
         first = (full_name or email.split("@")[0]).split()[0]
-        company = CompanyModel(
+        company = CompanyProfile(
             id=str(uuid.uuid4()),
             company_name=f"{first}'s Company",
             email=email,
@@ -139,14 +111,12 @@ def _create_placeholder_company(db: Session, full_name: str, email: str):
         return None
 
 def _provision_user_if_needed(db: Session, email: str, full_name: Optional[str]):
-    if not (db and UserModel):
-        return None, False
-    user = db.query(UserModel).filter(UserModel.email == email).first()
+    user = db.query(User).filter(User.email == email).first()
     if user:
         return user, False
     company = _create_placeholder_company(db, full_name or "", email)
     try:
-        user = UserModel(
+        user = User(
             id=str(uuid.uuid4()),
             email=email,
             full_name=full_name or email,
@@ -175,10 +145,10 @@ def _build_frontend_redirect(base_url: str, token: str, email: str, is_new: bool
     glue = "&" if ("?" in target) else "?"
     return f"{target}{glue}{qs}"
 
-# -------------------------------------------------------------------------
-# Routes
-# -------------------------------------------------------------------------
-@router.get("/google", name="google_login")
+# ---------------------------------------------------------------------
+# OAuth routes
+# ---------------------------------------------------------------------
+@router.get("/google")
 def google_login(next: Optional[str] = Query(default=None), select_account: bool = Query(default=True)):
     creds_dict = _require_client_secrets()
     flow = Flow.from_client_config(creds_dict, scopes=SCOPES, redirect_uri=REDIRECT_URI)
@@ -190,8 +160,8 @@ def google_login(next: Optional[str] = Query(default=None), select_account: bool
     )
     return RedirectResponse(auth_url)
 
-@router.get("/google/callback", name="google_callback")
-def google_callback(request: Request, db: Session = Depends(get_db) if get_db else None):
+@router.get("/google/callback")
+def google_callback(request: Request, db: Session = Depends(get_db)):
     code = request.query_params.get("code")
     if not code:
         err = request.query_params.get("error") or "Missing authorization code"
@@ -216,13 +186,13 @@ def google_callback(request: Request, db: Session = Depends(get_db) if get_db el
 
     _save_user_token(email, creds)
     user, is_new = _provision_user_if_needed(db, email, full_name)
+
+    # ✅ FIXED INDENTATION BLOCK
     if user and not getattr(user, "company_id", None):
-    company = _create_placeholder_company(db, full_name or "", email)
-    if company:
-        user.company_id = company.id
-        db.commit()
-
-
+        company = _create_placeholder_company(db, full_name or "", email)
+        if company:
+            user.company_id = company.id
+            db.commit()
 
     payload = {"email": email}
     if user:
@@ -240,6 +210,9 @@ def google_callback(request: Request, db: Session = Depends(get_db) if get_db el
     )
     return RedirectResponse(redirect_url)
 
+# ---------------------------------------------------------------------
+# Connection status + disconnect
+# ---------------------------------------------------------------------
 @router.get("/google/status")
 def google_status(user_email: str):
     if _load_user_token(user_email):
