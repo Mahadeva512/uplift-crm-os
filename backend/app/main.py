@@ -34,6 +34,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# ✅ Enable automatic redirect from `/path/` → `/path`
+app.router.redirect_slashes = True
+
 # ---------------------------------------------------------------------
 # ✅ CORS — final production version
 # ---------------------------------------------------------------------
