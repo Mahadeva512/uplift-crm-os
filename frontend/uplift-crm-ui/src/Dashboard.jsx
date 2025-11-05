@@ -57,7 +57,7 @@ useEffect(() => {
       const u = JSON.parse(localStorage.getItem("uplift_user") || "{}");
       setUser(u);
 
-      const res = await fetch(`${API_BASE}/company/company/profile`, {
+      const res = await fetch(`${API_BASE}/company/profile`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
@@ -90,7 +90,7 @@ useEffect(() => {
   async function updateCompany(data) {
     try {
       const token = localStorage.getItem("uplift_token");
-      const res = await fetch(`${API_BASE}/company/company/update`, {
+      const res = await fetch(`${API_BASE}/company/update`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
