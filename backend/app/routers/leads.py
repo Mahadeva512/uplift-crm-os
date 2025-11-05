@@ -1,13 +1,17 @@
+# backend/app/routers/leads.py
+
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
+
 from app.db.session import get_db
 from app.models.leads import Lead
 from app.schemas.leads import LeadCreate, LeadUpdate, LeadOut
 from app.models.user import User
 from app.routers.auth import get_current_user
 
-router = APIRouter(prefix="/leads", tags=["Leads"])
+# ❗ No prefix here. main.py already mounts this router at "/leads"
+router = APIRouter(tags=["Leads"])
 
 # ---------------------------------------------------------------------
 # ✅ CHECK DUPLICATE (must be before /{lead_id})
@@ -20,21 +24,19 @@ def check_duplicate(
 ):
     """
     Checks if a lead with the given email or phone already exists.
-    Example: /leads/check-duplicate?email=test@gmail.com
-    or /leads/check-duplicate?phone=9876543210
+    Called as: GET /leads/check-duplicate?email=... OR ?phone=...
     """
     if not email and not phone:
         raise HTTPException(status_code=400, detail="Please provide email or phone")
 
-    query = db.query(Lead)
+    q = db.query(Lead)
     exists = None
     if email:
-        exists = query.filter(Lead.email == email).first()
+        exists = q.filter(Lead.email == email).first()
     elif phone:
-        exists = query.filter(Lead.phone == phone).first()
+        exists = q.filter(Lead.phone == phone).first()
 
     return {"exists": bool(exists)}
-
 
 # ---------------------------------------------------------------------
 # ✅ CREATE LEAD
@@ -45,7 +47,7 @@ def create_lead(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Prevent duplicate leads for same company
+    # Prevent duplicate leads inside the same company
     existing = (
         db.query(Lead)
         .filter(
@@ -70,7 +72,6 @@ def create_lead(
     db.refresh(new_lead)
     return new_lead
 
-
 # ---------------------------------------------------------------------
 # ✅ GET ALL LEADS
 # ---------------------------------------------------------------------
@@ -79,14 +80,12 @@ def get_all_leads(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    leads = (
+    return (
         db.query(Lead)
         .filter(Lead.company_id == current_user.company_id)
         .order_by(Lead.created_at.desc())
         .all()
     )
-    return leads
-
 
 # ---------------------------------------------------------------------
 # ✅ GET LEAD BY ID
@@ -105,7 +104,6 @@ def get_lead_by_id(
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     return lead
-
 
 # ---------------------------------------------------------------------
 # ✅ UPDATE LEAD
@@ -131,7 +129,6 @@ def update_lead(
     db.commit()
     db.refresh(lead)
     return lead
-
 
 # ---------------------------------------------------------------------
 # ✅ DELETE LEAD
