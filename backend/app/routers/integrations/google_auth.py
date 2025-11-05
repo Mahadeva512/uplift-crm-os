@@ -223,6 +223,7 @@ def google_callback(request: Request, db: Session = Depends(get_db) if get_db el
         db.commit()
 
 
+
     payload = {"email": email}
     if user:
         payload["sub"] = str(getattr(user, "id", email))
