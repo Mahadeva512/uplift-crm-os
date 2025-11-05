@@ -216,6 +216,12 @@ def google_callback(request: Request, db: Session = Depends(get_db) if get_db el
 
     _save_user_token(email, creds)
     user, is_new = _provision_user_if_needed(db, email, full_name)
+    if user and not getattr(user, "company_id", None):
+    company = _create_placeholder_company(db, full_name or "", email)
+    if company:
+        user.company_id = company.id
+        db.commit()
+
 
     payload = {"email": email}
     if user:
