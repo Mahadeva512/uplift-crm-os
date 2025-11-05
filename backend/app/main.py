@@ -1,11 +1,11 @@
+# backend/app/main.py
 import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
-from app.core.config import settings
 from app.db.session import engine
-from app.models import base_model as base  # ✅ correct declarative base import
+from app.models import base_model as base
 
 # ---------------------------------------------------------------------
 # ✅ Logging Configuration
@@ -24,7 +24,6 @@ logger.info("🚀 Starting Uplift CRM Backend...")
 async def lifespan(app: FastAPI):
     logger.info("🔌 Application startup...")
     try:
-        # Future startup logic (e.g., caching, background tasks, etc.)
         yield
     finally:
         logger.info("🛑 Application shutdown...")
@@ -42,10 +41,16 @@ app = FastAPI(
 # ---------------------------------------------------------------------
 # ✅ CORS Configuration (Render + Local)
 # ---------------------------------------------------------------------
-logger.info(f"🌐 Allowed CORS Origins: {settings.CORS_ORIGINS}")
+ALLOWED_ORIGINS = [
+    "https://uplift-crm-ui.onrender.com",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+logger.info(f"🌐 Allowed CORS Origins: {ALLOWED_ORIGINS}")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -70,22 +75,28 @@ from app.routers import (
     tasks,
     users,
 )
+# ✅ Integrations folder router (Google OAuth)
+from app.routers.integrations import google_auth
 
+# ---------------------------------------------------------------------
+# ✅ Router Mounts (with correct prefixes)
+# ---------------------------------------------------------------------
 router_list = [
     (activities.router, "/activities"),
     (activity_overview.router, "/activity_overview"),
     (ai_gmail.router, "/ai_gmail"),
-    (ai_insights.router, "/ai_insights"),
+    (ai_insights.router, "/ai"),          # final endpoint: /ai/insights
     (ai_router.router, "/ai_router"),
     (auth.router, "/auth"),
-    (company_profile.router, "/company"),
+    (google_auth.router, "/auth"),        # final endpoint: /auth/google
+    (company_profile.router, "/company"), # final: /company/profile
     (dashboard.router, "/dashboard"),
     (gmail.router, "/gmail"),
     (leads.router, "/leads"),
     (order.router, "/order"),
     (quotation.router, "/quotation"),
     (tasks.router, "/tasks"),
-    (users.router, "/users"),
+    (users.router, "/users"),             # final: /users/me
 ]
 
 for router, prefix in router_list:
@@ -101,7 +112,7 @@ async def root():
         "status": "ok",
         "app": "Uplift CRM OS",
         "version": "1.0.0",
-        "backend_base_url": settings.BACKEND_BASE_URL,
+        "backend_base_url": "https://uplift-crm-os.onrender.com",
     }
 
 @app.get("/health")
@@ -118,9 +129,9 @@ except Exception as e:
     logger.warning(f"⚠️ Table creation skipped due to error: {e}")
 
 # ---------------------------------------------------------------------
-# ✅ Future Notes
+# ✅ Notes
 # ---------------------------------------------------------------------
-# - Just drop new routers into app/routers and append them above.
-# - Logging auto-streams to Render logs.
-# - CORS automatically syncs with config.
-# - Safe for async DB and background services.
+# - No double prefixes (all routers now clean).
+# - Google OAuth (integrations/google_auth.py) mounted correctly under /auth.
+# - CORS whitelist covers Render UI and local dev.
+# - Safe for future routers; just add imports and append to router_list.

@@ -1,3 +1,4 @@
+# backend/app/routers/integrations/google_auth.py
 from __future__ import annotations
 import json, logging, os, uuid
 from datetime import datetime, timedelta
@@ -8,9 +9,9 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------
 # DB + models
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------
 try:
     from app.db.session import get_db
     from sqlalchemy.orm import Session
@@ -20,7 +21,6 @@ except Exception:
 
 UserModel = None
 CompanyModel = None
-
 try:
     from app.models.users import User as UserModel
 except Exception:
@@ -28,7 +28,6 @@ except Exception:
         from app.models.user import User as UserModel
     except Exception:
         pass
-
 try:
     from app.models.company_profile import CompanyProfile as CompanyModel
 except Exception:
@@ -37,14 +36,13 @@ except Exception:
     except Exception:
         pass
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------
 # JWT helper
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------
 try:
     from app.routers.auth import create_access_token
 except Exception:
     import jwt
-
     SECRET_KEY = os.getenv("UPLIFT_SECRET_KEY", "dev-secret")
     ALGORITHM = "HS256"
 
@@ -53,11 +51,11 @@ except Exception:
         payload = {**data, "exp": datetime.utcnow() + timedelta(minutes=minutes)}
         return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------
 # Setup & constants
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------
 logger = logging.getLogger("google_auth")
-router = APIRouter()
+router = APIRouter(tags=["auth"])   # ✅ single 'auth' tag, no /auth prefix inside
 
 os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
 
@@ -69,11 +67,11 @@ def _token_path(email: str) -> Path:
     safe = (email or "").replace("/", "_")
     return CREDENTIALS_DIR / f"token_{safe}.json"
 
-# ✅ Updated backend domain
+# ✅ Allow override from Render env
 BACKEND_BASE = os.getenv("BACKEND_BASE_URL", "https://uplift-crm-os.onrender.com").rstrip("/")
-FRONTEND_BASE = os.getenv("FRONTEND_BASE_URL", "http://localhost:4173").rstrip("/")
+FRONTEND_BASE = os.getenv("FRONTEND_BASE_URL", "https://uplift-crm-ui.onrender.com").rstrip("/")
 REDIRECT_URI = f"{BACKEND_BASE}/auth/google/callback"
-FRONTEND_AFTER_GOOGLE = FRONTEND_BASE or "http://localhost:4173"
+FRONTEND_AFTER_GOOGLE = FRONTEND_BASE
 
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
@@ -84,6 +82,9 @@ SCOPES = [
     "openid",
 ]
 
+# -------------------------------------------------------------------------
+# Credentials helper
+# -------------------------------------------------------------------------
 from app.core.auth_config import GOOGLE_CREDS
 
 def _require_client_secrets() -> dict:
@@ -93,10 +94,7 @@ def _require_client_secrets() -> dict:
             raise KeyError("client_id/client_secret missing")
     except Exception as e:
         logger.error("Missing Google OAuth env config: %s", e)
-        raise HTTPException(
-            status_code=500,
-            detail="Missing Google OAuth credentials in environment variables",
-        )
+        raise HTTPException(status_code=500, detail="Missing Google OAuth credentials")
     return GOOGLE_CREDS
 
 def _save_user_token(email: str, creds) -> None:
@@ -169,11 +167,17 @@ def _provision_user_if_needed(db: Session, email: str, full_name: Optional[str])
 def _build_frontend_redirect(base_url: str, token: str, email: str, is_new: bool, next_param: Optional[str]) -> str:
     from urllib.parse import urlencode
     target = (next_param or "").strip() or base_url
-    qs = urlencode({"google_token": token, "email": email, "is_new": "1" if is_new else "0"})
+    qs = urlencode({
+        "google_token": token,
+        "email": email,
+        "is_new": "1" if is_new else "0"
+    })
     glue = "&" if ("?" in target) else "?"
     return f"{target}{glue}{qs}"
 
-# ✅ FIX: remove double /auth prefix conflict
+# -------------------------------------------------------------------------
+# Routes
+# -------------------------------------------------------------------------
 @router.get("/google", name="google_login")
 def google_login(next: Optional[str] = Query(default=None), select_account: bool = Query(default=True)):
     creds_dict = _require_client_secrets()
