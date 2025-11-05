@@ -14,21 +14,20 @@ from app.schemas.tasks import TaskBase
 
 router = APIRouter(prefix="/tasks", tags=["Tasks"])
 
-
 # ---------------------------------------------------------------------------
-# HELPERS
+# 🧮 Distance Helper
 # ---------------------------------------------------------------------------
 def calc_distance(lat1, lng1, lat2, lng2):
     if not all([lat1, lng1, lat2, lng2]):
         return None
-    R = 6371.0
+    R = 6371.0  # Earth radius (km)
     dlat, dlon = radians(lat2 - lat1), radians(lng2 - lng1)
     a = sin(dlat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2) ** 2
     return round(R * 2 * atan2(sqrt(a), sqrt(1 - a)), 2)
 
 
 # ---------------------------------------------------------------------------
-# LIST (joined Lead + User)
+# 📋 List Tasks
 # ---------------------------------------------------------------------------
 @router.get("/", response_model=List[TaskBase])
 def get_tasks(
@@ -43,6 +42,7 @@ def get_tasks(
         .options(joinedload(Task.lead), joinedload(Task.assigned_user))
         .filter(Task.company_id == current_user.company_id)
     )
+
     if current_user.role != "admin":
         q = q.filter(or_(Task.assigned_to == current_user.id, Task.created_by == current_user.id))
     if lead_id:
@@ -63,7 +63,7 @@ def get_tasks(
 
 
 # ---------------------------------------------------------------------------
-# CREATE / UPDATE / DELETE / SPECIAL VIEWS
+# ➕ Create Task
 # ---------------------------------------------------------------------------
 @router.post("/", status_code=status.HTTP_201_CREATED, response_model=TaskBase)
 def create_task(data: dict, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
@@ -76,9 +76,7 @@ def create_task(data: dict, db: Session = Depends(get_db), current_user: User = 
     if not clean.get("assigned_to"):
         clean["assigned_to"] = current_user.id
 
-    task = Task(**clean)
-    task.company_id = current_user.company_id
-    task.created_by = current_user.id
+    task = Task(**clean, company_id=current_user.company_id, created_by=current_user.id)
 
     last = (
         db.query(Task)
@@ -95,6 +93,9 @@ def create_task(data: dict, db: Session = Depends(get_db), current_user: User = 
     return task
 
 
+# ---------------------------------------------------------------------------
+# ✏️ Update Task
+# ---------------------------------------------------------------------------
 @router.put("/{task_id}", response_model=TaskBase)
 def update_task(task_id: str, data: dict, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     task = db.query(Task).filter(Task.id == task_id, Task.company_id == current_user.company_id).first()
@@ -118,6 +119,9 @@ def update_task(task_id: str, data: dict, db: Session = Depends(get_db), current
     return task
 
 
+# ---------------------------------------------------------------------------
+# ❌ Delete Task
+# ---------------------------------------------------------------------------
 @router.delete("/{task_id}")
 def delete_task(task_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     task = db.query(Task).filter(Task.id == task_id, Task.company_id == current_user.company_id).first()
@@ -130,7 +134,9 @@ def delete_task(task_id: str, db: Session = Depends(get_db), current_user: User 
     return {"message": "Task deleted"}
 
 
-# ---- Today / Upcoming / Reminders ----
+# ---------------------------------------------------------------------------
+# 📅 Today / Upcoming / Reminder Views
+# ---------------------------------------------------------------------------
 @router.get("/today", response_model=List[TaskBase])
 def today(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     today = datetime.utcnow().date()

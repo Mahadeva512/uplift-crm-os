@@ -79,7 +79,7 @@ from app.routers.integrations import google_auth
 
 routers = [
     (activities.router, "/activities"),
-    (activity_overview.router, "/activity_overview"),
+    (activity_overview.router, "/activities"),  # ✅ corrected prefix
     (ai_gmail.router, "/ai_gmail"),
     (ai_insights.router, "/ai"),
     (ai_router.router, "/ai_router"),

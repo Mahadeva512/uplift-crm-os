@@ -17,9 +17,6 @@ def get_activity_overview(
     limit: int = Query(50, description="Limit number of records"),
     offset: int = Query(0, description="Offset for pagination"),
 ):
-    """
-    Fetch summarized activity data from PostgreSQL view 'activity_overview_view'.
-    """
     try:
         query = "SELECT * FROM activity_overview_view WHERE 1=1"
         params = {}
@@ -54,6 +51,5 @@ def get_activity_overview(
             },
             "data": records,
         }
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching overview: {str(e)}")
