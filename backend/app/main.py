@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from contextlib import asynccontextmanager
 from app.db.session import engine
-import app.db.base as base  # ✅ directly import base module
+from app.db import base_class as base  # ✅ import your real base module
 from app.utils.logger import log_setup
 
 # ✅ Setup Logging
