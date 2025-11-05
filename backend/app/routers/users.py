@@ -8,10 +8,11 @@ from app.schemas.user import UserResponse
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
+
 # ------------------------------------------------------------------
-# ✅ /me  — always returns something, never crashes
+# ✅ /me — always returns something, never crashes
 # ------------------------------------------------------------------
-@router.get("/me", response_model=UserResponse)
+@router.get("/me")
 def get_current_user(db: Session = Depends(get_db)):
     """
     Returns the first admin user or creates one if DB is empty.
@@ -20,11 +21,25 @@ def get_current_user(db: Session = Depends(get_db)):
     user = db.query(User).filter(User.role == "admin").first()
     if not user:
         # Auto-create fallback admin for first-time deploys
-        user = User(full_name="Uplift Admin", email="admin@upliftcrm.com", role="admin", is_active=True)
+        user = User(
+            full_name="Uplift Admin",
+            email="admin@upliftcrm.com",
+            role="admin",
+            is_active=True,
+        )
         db.add(user)
         db.commit()
         db.refresh(user)
-    return user
+
+    # ✅ Return plain dict to avoid ResponseValidationError
+    return {
+        "id": str(user.id),
+        "email": user.email,
+        "full_name": user.full_name,
+        "role": user.role,
+        "company_id": str(user.company_id) if user.company_id else None,
+        "is_active": user.is_active,
+    }
 
 
 # ------------------------------------------------------------------

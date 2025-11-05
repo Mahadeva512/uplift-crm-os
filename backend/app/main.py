@@ -26,6 +26,7 @@ async def lifespan(app: FastAPI):
     yield
     logger.info("🛑 Shutdown")
 
+
 app = FastAPI(
     title="Uplift CRM OS",
     description="Uplift CRM unified backend (production)",
@@ -34,7 +35,7 @@ app = FastAPI(
 )
 
 # ---------------------------------------------------------------------
-# CORS
+# ✅ CORS — final production version
 # ---------------------------------------------------------------------
 env_origins = os.getenv("CORS_ORIGINS", "")
 ALLOWED_ORIGINS = [x.strip() for x in env_origins.split(",") if x.strip()] or [
@@ -109,6 +110,7 @@ def root():
         "backend": os.getenv("BACKEND_BASE_URL"),
         "frontend": os.getenv("FRONTEND_BASE_URL"),
     }
+
 
 @app.get("/health")
 def health():
