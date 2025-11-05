@@ -10,7 +10,7 @@ from app.schemas.leads import LeadCreate, LeadUpdate, LeadOut
 from app.models.user import User
 from app.routers.auth import get_current_user
 
-# ❗ No prefix here. main.py already mounts this router at "/leads"
+# ✅ Removed internal prefix to prevent /leads/leads duplication
 router = APIRouter(tags=["Leads"])
 
 # ---------------------------------------------------------------------

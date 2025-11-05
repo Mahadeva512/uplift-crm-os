@@ -1,3 +1,5 @@
+# backend/app/routers/users.py
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -6,7 +8,8 @@ from app.db.session import get_db
 from app.models.user import User
 from app.schemas.user import UserResponse
 
-router = APIRouter(prefix="/users", tags=["Users"])
+# ✅ Removed prefix="/users" to prevent /users/users duplication
+router = APIRouter(tags=["Users"])
 
 
 # ------------------------------------------------------------------

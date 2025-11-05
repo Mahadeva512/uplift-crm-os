@@ -1,3 +1,4 @@
+# backend/app/routers/tasks.py
 from datetime import datetime, timedelta
 from math import radians, sin, cos, sqrt, atan2
 from typing import List, Optional
@@ -12,7 +13,8 @@ from app.models.user import User
 from app.routers.auth import get_current_user
 from app.schemas.tasks import TaskBase
 
-router = APIRouter(prefix="/tasks", tags=["Tasks"])
+# ✅ Removed internal prefix to avoid /tasks/tasks duplication
+router = APIRouter(tags=["Tasks"])
 
 # ---------------------------------------------------------------------------
 # 🧮 Distance Helper
@@ -66,7 +68,11 @@ def get_tasks(
 # ➕ Create Task
 # ---------------------------------------------------------------------------
 @router.post("/", status_code=status.HTTP_201_CREATED, response_model=TaskBase)
-def create_task(data: dict, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def create_task(
+    data: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     lead = db.query(Lead).filter(Lead.id == data.get("lead_id"), Lead.company_id == current_user.company_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -97,7 +103,12 @@ def create_task(data: dict, db: Session = Depends(get_db), current_user: User = 
 # ✏️ Update Task
 # ---------------------------------------------------------------------------
 @router.put("/{task_id}", response_model=TaskBase)
-def update_task(task_id: str, data: dict, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def update_task(
+    task_id: str,
+    data: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     task = db.query(Task).filter(Task.id == task_id, Task.company_id == current_user.company_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -123,7 +134,11 @@ def update_task(task_id: str, data: dict, db: Session = Depends(get_db), current
 # ❌ Delete Task
 # ---------------------------------------------------------------------------
 @router.delete("/{task_id}")
-def delete_task(task_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def delete_task(
+    task_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     task = db.query(Task).filter(Task.id == task_id, Task.company_id == current_user.company_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -189,7 +204,12 @@ def reminders(db: Session = Depends(get_db), current_user: User = Depends(get_cu
     q = (
         db.query(Task)
         .options(joinedload(Task.lead))
-        .filter(Task.company_id == current_user.company_id, Task.due_date <= soon, Task.due_date >= now, Task.status != "Done")
+        .filter(
+            Task.company_id == current_user.company_id,
+            Task.due_date <= soon,
+            Task.due_date >= now,
+            Task.status != "Done",
+        )
     )
     if current_user.role != "admin":
         q = q.filter(or_(Task.assigned_to == current_user.id, Task.created_by == current_user.id))

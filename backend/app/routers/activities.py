@@ -1,3 +1,4 @@
+# backend/app/routers/activities.py
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
@@ -11,7 +12,8 @@ from app.models.user import User
 from app.schemas.activities import ActivityCreate, ActivityUpdate, ActivityOut, ActivityVerify
 from app.routers.auth import get_current_user
 
-router = APIRouter(prefix="/activities", tags=["Activities"])
+# ✅ Removed internal prefix to avoid /activities/activities conflict
+router = APIRouter(tags=["Activities"])
 
 
 def _must_own_or_admin(current_user: User, activity: Activity):

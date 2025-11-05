@@ -1,4 +1,4 @@
-# app/routers/company_profile.py
+# backend/app/routers/company_profile.py
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from datetime import datetime
@@ -8,10 +8,13 @@ from app.models.company_profile import CompanyProfile
 from app.models.user import User
 from app.routers.auth import get_current_user
 
-router = APIRouter(prefix="/company", tags=["Company Profile"])
+# ✅ Removed prefix="/company" to prevent /company/company duplication
+router = APIRouter(tags=["Company Profile"])
 
 
-# ✅ 1️⃣ Fetch current company profile — Auto-create if missing
+# ---------------------------------------------------------------------
+# 1️⃣ Fetch current company profile — Auto-create if missing
+# ---------------------------------------------------------------------
 @router.get("/profile")
 def get_company_profile(
     db: Session = Depends(get_db),
@@ -21,7 +24,6 @@ def get_company_profile(
     Returns the current company profile for the logged-in user.
     Auto-creates a blank profile if none exists to prevent 500/404 errors.
     """
-    # if user doesn't have a company yet, create one
     if not getattr(current_user, "company_id", None):
         new_company = CompanyProfile(
             company_name=f"{current_user.full_name.split()[0]}'s Company"
@@ -37,14 +39,12 @@ def get_company_profile(
         db.commit()
         return new_company
 
-    # otherwise, fetch the company
     company = (
         db.query(CompanyProfile)
         .filter(CompanyProfile.id == current_user.company_id)
         .first()
     )
     if not company:
-        # if missing (possible data mismatch), recreate
         company = CompanyProfile(
             id=current_user.company_id,
             company_name="My Company",
@@ -57,7 +57,9 @@ def get_company_profile(
     return company
 
 
-# ✅ 2️⃣ Update company profile — used by Onboarding modal
+# ---------------------------------------------------------------------
+# 2️⃣ Update company profile — used by Onboarding modal
+# ---------------------------------------------------------------------
 @router.post("/update")
 def update_company_profile(
     data: dict,
@@ -68,7 +70,6 @@ def update_company_profile(
     Updates or creates company details.
     Fields allowed: company_name, industry, team_size, theme_color, accent_color, footer_note.
     """
-    # ensure the company exists first
     company = (
         db.query(CompanyProfile)
         .filter(CompanyProfile.id == current_user.company_id)
@@ -104,14 +105,14 @@ def update_company_profile(
     return company
 
 
-# ✅ 3️⃣ Backward compatibility (optional)
+# ---------------------------------------------------------------------
+# 3️⃣ Backward compatibility (legacy support)
+# ---------------------------------------------------------------------
 @router.post("/profile", include_in_schema=False)
 def upsert_profile(
     data: dict,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Legacy alias for /update — kept for backward compatibility with old frontend calls.
-    """
+    """Legacy alias for /update — kept for backward compatibility."""
     return update_company_profile(data, db, current_user)

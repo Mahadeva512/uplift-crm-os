@@ -1,10 +1,12 @@
+# backend/app/routers/activity_overview.py
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from typing import Optional
 from app.db.session import get_db
 
-router = APIRouter(prefix="/activities", tags=["Activity Overview"])
+# ✅ Removed internal prefix to prevent /activities/activities duplication
+router = APIRouter(tags=["Activity Overview"])
 
 
 @router.get("/overview")
