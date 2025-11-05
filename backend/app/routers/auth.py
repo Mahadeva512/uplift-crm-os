@@ -11,7 +11,7 @@ from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
 # ✅ Unified Config Import
-from app.config import settings
+from app.core.config import settings
 from app.db.session import get_db
 from app.models.user import User
 from app.models.company_profile import CompanyProfile
