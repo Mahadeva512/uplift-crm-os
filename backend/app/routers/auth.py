@@ -1,3 +1,4 @@
+# backend/app/routers/auth.py
 from datetime import datetime, timedelta
 from typing import Optional
 from uuid import UUID
@@ -9,41 +10,41 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
-# Internal imports
-from app.core.config import settings
+# ✅ Unified Config Import
+from app.config import settings
 from app.db.session import get_db
 from app.models.user import User
 from app.models.company_profile import CompanyProfile
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
-# ===================== Security & JWT =====================
+# ---------------------------------------------------------------------
+# Security & JWT
+# ---------------------------------------------------------------------
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 http_bearer = HTTPBearer(auto_error=False)
 
-ALGORITHM = "HS256"
+ALGORITHM = settings.JWT_ALGORITHM or "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 1 day
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    """Verify password hash with backward safety for legacy users"""
+    """Verify password with fallback for legacy users"""
     try:
         return pwd_context.verify(plain, hashed)
     except Exception:
-        # fallback for legacy plain-text passwords (not secure but avoids crash)
         return plain == hashed
 
 
 def hash_password(plain: str) -> str:
-    """Hash password safely"""
-    return pwd_context.hash(plain[:72])  # bcrypt max limit safeguard
+    """Hash password safely (bcrypt limit protection)"""
+    return pwd_context.hash(plain[:72])
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
-    """Generate JWT token safely (convert UUIDs to str)"""
+    """Generate JWT using unified settings"""
     to_encode = {}
     for k, v in data.items():
-        # Convert UUIDs and other non-JSON-safe objects to strings
         if isinstance(v, UUID):
             to_encode[k] = str(v)
         else:
@@ -51,26 +52,26 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 
     expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode.update({"exp": expire})
-    return jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+    return jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=ALGORITHM)
 
 
-# ===================== Dependencies =====================
+# ---------------------------------------------------------------------
+# Auth Dependency
+# ---------------------------------------------------------------------
 def get_current_user(
     creds: Optional[HTTPAuthorizationCredentials] = Depends(http_bearer),
     db: Session = Depends(get_db),
 ) -> User:
-    """Extract current user from JWT"""
     if creds is None or not creds.credentials:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing token")
 
     token = creds.credentials
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[ALGORITHM])
         user_id_raw = payload.get("sub")
         if not user_id_raw:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
-        # Convert user_id to UUID safely
         try:
             user_id = UUID(user_id_raw)
         except Exception:
@@ -85,28 +86,15 @@ def get_current_user(
     return user
 
 
-# ===================== Routes =====================
-
-@router.post("/signup", summary="Register new company and admin user", name="auth_signup")
+# ---------------------------------------------------------------------
+# Signup
+# ---------------------------------------------------------------------
+@router.post("/signup", summary="Register new company and admin user")
 def signup(payload: dict, db: Session = Depends(get_db)):
-    """
-    Body Example:
-    {
-        "full_name": "Admin User",
-        "email": "owner@123.com",
-        "password": "admin123",
-        "company_name": "Uplift",
-        "theme_color": "#0048E8",      (optional)
-        "accent_color": "#FACC15",     (optional)
-        "footer_note": "Thank you!"    (optional)
-    }
-    """
-    # --- Check if email already exists ---
     existing = db.query(User).filter(User.email == payload["email"]).first()
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    # --- Create company profile ---
     company = CompanyProfile(
         company_name=payload["company_name"],
         email=payload["email"],
@@ -117,9 +105,8 @@ def signup(payload: dict, db: Session = Depends(get_db)):
         updated_at=datetime.utcnow(),
     )
     db.add(company)
-    db.flush()  # fetch company.id before commit
+    db.flush()
 
-    # --- Create admin user ---
     user = User(
         email=payload["email"],
         full_name=payload["full_name"],
@@ -134,7 +121,6 @@ def signup(payload: dict, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(user)
 
-    # --- Return confirmation ---
     return {
         "message": "Signup successful",
         "user": {
@@ -154,48 +140,29 @@ def signup(payload: dict, db: Session = Depends(get_db)):
     }
 
 
-# ==========================================================
-#  ✅ Robust OAuth2 Login (Form-data compatible with Swagger)
-# ==========================================================
-@router.post("/login", summary="Login (Generate JWT)", name="auth_login")
+# ---------------------------------------------------------------------
+# Login (Form-data)
+# ---------------------------------------------------------------------
+@router.post("/login", summary="Login (Generate JWT)")
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    """
-    Accepts form-data (Swagger-compatible):
-    username=<email>
-    password=<password>
-    """
-
-    # 🔍 Find user by email (username field holds email)
     user = db.query(User).filter(User.email == form_data.username).first()
-
     if not user or not verify_password(form_data.password, user.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials"
-        )
+        raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    # 🧾 Generate and return JWT (convert UUIDs to str)
     token = create_access_token({
         "sub": str(user.id),
         "email": user.email,
         "company_id": str(user.company_id),
-        "role": user.role
+        "role": user.role,
     })
-
     return {"access_token": token, "token_type": "bearer"}
 
 
-# ==========================================================
-#  ✅ Authenticated user info
-# ==========================================================
-@router.get(
-    "/me",
-    summary="Get Logged-In User Info",
-    name="auth_me",
-    openapi_extra={"security": [{"BearerAuth": []}]},
-)
+# ---------------------------------------------------------------------
+# Get Current User
+# ---------------------------------------------------------------------
+@router.get("/me", summary="Get Logged-In User Info")
 def get_me(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Return user + company details of the logged-in user"""
     company = db.query(CompanyProfile).filter(CompanyProfile.id == current_user.company_id).first()
     return {
         "id": str(current_user.id),
@@ -205,201 +172,9 @@ def get_me(current_user: User = Depends(get_current_user), db: Session = Depends
         "company_id": str(current_user.company_id),
         "company": {
             "id": str(company.id) if company else None,
-            "company_name": company.company_name if company else None,
+            "company_name": getattr(company, "company_name", None),
             "theme_color": getattr(company, "theme_color", None),
             "accent_color": getattr(company, "accent_color", None),
             "footer_note": getattr(company, "footer_note", None),
         },
-    }
-
-# ==========================================================
-#  🌐 GOOGLE OAUTH LOGIN (LIVE READY FOR RENDER) — FIXED
-# ==========================================================
-from os import getenv
-from google_auth_oauthlib.flow import Flow
-import pathlib, json, base64, secrets
-from sqlalchemy.orm import Session
-from fastapi import Depends, Request
-from fastapi.responses import RedirectResponse
-
-from app.db.session import get_db
-from app.models.user import User
-from app.models.company_profile import CompanyProfile
-
-GOOGLE_CLIENT_ID = getenv("GOOGLE_OAUTH_CLIENT_ID") or getenv("GOOGLE_CLIENT_ID")
-GOOGLE_CLIENT_SECRET = getenv("GOOGLE_OAUTH_CLIENT_SECRET") or getenv("GOOGLE_CLIENT_SECRET")
-
-BACKEND_URL = getenv("BACKEND_URL", getattr(settings, "BACKEND_BASE_URL", None) or "https://uplift-crm-backend.onrender.com")
-FRONTEND_URL = getenv("FRONTEND_URL", getattr(settings, "FRONTEND_BASE_URL", None) or "http://localhost:4173")
-GOOGLE_REDIRECT_URI = getenv("GOOGLE_OAUTH_REDIRECT_URI") or f"{BACKEND_URL}/auth/google/callback"
-
-BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
-SCOPES = [
-    "openid",
-    "https://www.googleapis.com/auth/userinfo.email",
-    "https://www.googleapis.com/auth/userinfo.profile",
-    "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/gmail.send",
-    "https://www.googleapis.com/auth/gmail.modify",
-]
-
-def _flow():
-    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
-        raise HTTPException(status_code=500, detail="Google OAuth not configured")
-    flow = Flow.from_client_config(
-        {
-            "web": {
-                "client_id": GOOGLE_CLIENT_ID,
-                "client_secret": GOOGLE_CLIENT_SECRET,
-                "redirect_uris": [GOOGLE_REDIRECT_URI],
-                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                "token_uri": "https://oauth2.googleapis.com/token",
-            }
-        },
-        scopes=SCOPES,
-    )
-    flow.redirect_uri = GOOGLE_REDIRECT_URI
-    return flow
-
-def _encode_state(obj: dict) -> str:
-    raw = json.dumps(obj, separators=(",", ":")).encode("utf-8")
-    return base64.urlsafe_b64encode(raw).decode("ascii")
-
-def _decode_state(s: str) -> dict:
-    try:
-        raw = base64.urlsafe_b64decode(s.encode("ascii"))
-        return json.loads(raw.decode("utf-8"))
-    except Exception:
-        return {}
-
-@router.get("/google", summary="Start Google OAuth flow", name="auth_google_start")
-def google_login(request: Request):
-    """
-    Preserve ?next=<url> by packing it into OAuth 'state'
-    """
-    flow = _flow()
-    next_url = request.query_params.get("next") or f"{FRONTEND_URL}/dashboard"
-    state = _encode_state({"next": next_url, "nonce": secrets.token_urlsafe(12)})
-    auth_url, _ = flow.authorization_url(
-        prompt="consent",
-        access_type="offline",
-        include_granted_scopes="true",
-        state=state,
-    )
-    return RedirectResponse(auth_url)
-
-@router.get("/google/callback", summary="Handle Google OAuth callback", name="auth_google_callback")
-def google_callback(request: Request, db: Session = Depends(get_db)):
-    """
-    Exchange code -> credentials, upsert user, mint JWT, and redirect back with token.
-    """
-    flow = _flow()
-
-    # Exchange code for tokens
-    try:
-        flow.fetch_token(authorization_response=str(request.url))
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"OAuth callback error: {e}")
-
-    # Pull state for post-login redirect
-    state_raw = request.query_params.get("state") or ""
-    state = _decode_state(state_raw)
-    next_url = state.get("next") or f"{FRONTEND_URL}/dashboard"
-
-    # Fetch user profile
-    try:
-        from googleapiclient.discovery import build
-        oauth2 = build("oauth2", "v2", credentials=flow.credentials)
-        user_info = oauth2.userinfo().get().execute() or {}
-    except Exception:
-        user_info = {}
-
-    email = (user_info.get("email") or "").lower().strip()
-    full_name = (user_info.get("name") or user_info.get("given_name") or "").strip()
-    if not email:
-        # Graceful fallback: send to login with an error
-        return RedirectResponse(f"{FRONTEND_URL}/login?error=google_no_email")
-
-    # Upsert user (+ minimal company if needed)
-    user = db.query(User).filter(User.email == email).first()
-    if not user:
-        company = CompanyProfile(
-            company_name=(email.split("@")[0] or "Uplift").title(),
-            email=email,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
-        )
-        db.add(company)
-        db.flush()
-        user = User(
-            email=email,
-            full_name=full_name or email.split("@")[0],
-            role="admin",
-            company_id=company.id,
-            hashed_password=pwd_context.hash(secrets.token_urlsafe(16)),  # random
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-
-    # Mint JWT and bounce to frontend with token + email
-    token = create_access_token({"sub": str(user.id), "email": user.email, "company_id": str(user.company_id)})
-
-    # Send as query params so your LoginScreen.jsx can persist them
-    redirect_with_token = f"{next_url}?access_token={token}&email={email}"
-    return RedirectResponse(redirect_with_token, status_code=302)
-    
-# ==========================================================
-#  📱 GOOGLE SIGN-IN (ANDROID / FIREBASE APP)
-# ==========================================================
-from pydantic import BaseModel
-import httpx
-
-class GoogleLoginRequest(BaseModel):
-    id_token: str
-
-
-@router.post("/google-login", summary="Google Sign-In for Android app")
-async def google_login_mobile(data: GoogleLoginRequest, db: Session = Depends(get_db)):
-    """
-    1️⃣ Verify the Google ID token sent by Android app.
-    2️⃣ If email exists in CRM user DB → return JWT.
-    3️⃣ Else → reject login.
-    """
-    # Step 1: Verify token with Google
-    async with httpx.AsyncClient() as client:
-        res = await client.get(
-            "https://oauth2.googleapis.com/tokeninfo",
-            params={"id_token": data.id_token}
-        )
-    if res.status_code != 200:
-        raise HTTPException(status_code=401, detail="Invalid Google token")
-
-    info = res.json()
-    email = info.get("email")
-    name = info.get("name")
-
-    if not email:
-        raise HTTPException(status_code=400, detail="Email not found in Google token")
-
-    # Step 2: Check CRM DB for this user
-    user = db.query(User).filter(User.email == email).first()
-    if not user:
-        raise HTTPException(status_code=403, detail="User not registered in CRM")
-
-    # Step 3: Issue standard CRM JWT (same as /login)
-    token = create_access_token({
-        "sub": str(user.id),
-        "email": user.email,
-        "company_id": str(user.company_id),
-        "role": user.role,
-    })
-
-    return {
-        "access_token": token,
-        "token_type": "bearer",
-        "email": email,
-        "name": name,
     }
