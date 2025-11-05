@@ -1,70 +1,132 @@
 # backend/app/routers/users.py
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List, Optional
-from uuid import UUID
+from datetime import datetime
 from app.db.session import get_db
 from app.models.user import User
-from app.schemas.user import UserResponse
+from app.schemas.user import UserCreate, UserResponse
+from app.routers.auth import get_current_user
 
-# ✅ Removed prefix="/users" to prevent /users/users duplication
+# ✅ Removed prefix="/users" to prevent duplicate /users/users paths
 router = APIRouter(tags=["Users"])
 
 
-# ------------------------------------------------------------------
-# ✅ /me — always returns something, never crashes
-# ------------------------------------------------------------------
-@router.get("/me")
-def get_current_user(db: Session = Depends(get_db)):
-    """
-    Returns the first admin user or creates one if DB is empty.
-    Prevents 500 errors when no admin/user exists yet.
-    """
-    user = db.query(User).filter(User.role == "admin").first()
-    if not user:
-        # Auto-create fallback admin for first-time deploys
-        user = User(
-            full_name="Uplift Admin",
-            email="admin@upliftcrm.com",
-            role="admin",
-            is_active=True,
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-
-    # ✅ Return plain dict to avoid ResponseValidationError
-    return {
-        "id": str(user.id),
-        "email": user.email,
-        "full_name": user.full_name,
-        "role": user.role,
-        "company_id": str(user.company_id) if user.company_id else None,
-        "is_active": user.is_active,
-    }
+# ---------------------------------------------------------------------
+# 👤 Current User
+# ---------------------------------------------------------------------
+@router.get("/me", response_model=UserResponse)
+def get_current_user_info(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return the current authenticated user"""
+    return current_user
 
 
-# ------------------------------------------------------------------
-# ✅ Get user by UUID
-# ------------------------------------------------------------------
+# ---------------------------------------------------------------------
+# 🧾 Get User by ID
+# ---------------------------------------------------------------------
 @router.get("/{user_id}", response_model=UserResponse)
-def get_user_by_id(user_id: UUID, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.id == user_id).first()
+def get_user(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Fetch a user by ID — company scoped"""
+    user = (
+        db.query(User)
+        .filter(User.id == user_id, User.company_id == current_user.company_id)
+        .first()
+    )
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user
 
 
-# ------------------------------------------------------------------
-# ✅ Get all users (optionally filtered by company_id)
-# ------------------------------------------------------------------
-@router.get("/", response_model=List[UserResponse])
-def get_all_users(
+# ---------------------------------------------------------------------
+# ➕ Create New User (Admin only)
+# ---------------------------------------------------------------------
+@router.post("/", response_model=UserResponse)
+def create_user(
+    payload: UserCreate,
     db: Session = Depends(get_db),
-    company_id: Optional[UUID] = Query(None, description="Filter by company_id"),
+    current_user: User = Depends(get_current_user),
 ):
-    query = db.query(User)
-    if company_id:
-        query = query.filter(User.company_id == company_id)
-    return query.all()
+    """Admin: create a new user under same company"""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    exists = db.query(User).filter(User.email == payload.email).first()
+    if exists:
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    new_user = User(
+        email=payload.email,
+        full_name=payload.full_name,
+        hashed_password=payload.hashed_password,
+        role=payload.role,
+        is_active=True,
+        company_id=current_user.company_id,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return new_user
+
+
+# ---------------------------------------------------------------------
+# ✏️ Update User
+# ---------------------------------------------------------------------
+@router.put("/{user_id}", response_model=UserResponse)
+def update_user(
+    user_id: str,
+    data: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Update user details"""
+    user = (
+        db.query(User)
+        .filter(User.id == user_id, User.company_id == current_user.company_id)
+        .first()
+    )
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    for key, value in data.items():
+        if hasattr(user, key) and value not in [None, ""]:
+            setattr(user, key, value)
+
+    user.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+# ---------------------------------------------------------------------
+# ❌ Delete User (Admin only)
+# ---------------------------------------------------------------------
+@router.delete("/{user_id}")
+def delete_user(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Admin: delete user"""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    user = (
+        db.query(User)
+        .filter(User.id == user_id, User.company_id == current_user.company_id)
+        .first()
+    )
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    db.delete(user)
+    db.commit()
+    return {"message": "User deleted successfully"}
